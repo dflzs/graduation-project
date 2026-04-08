@@ -1,0 +1,28 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/Auth/LoginPage",
+    "pages/Auth/PasswordLoginPage",
+    "pages/Auth/RegisterVerifyPage",
+    "pages/Auth/RegisterProfilePage",
+    "pages/Auth/PhoneLoginStep1Page",
+    "pages/Auth/PhoneLoginStep2Page",
+    "pages/Auth/RegisterStep1Page",
+    "pages/Auth/RegisterStep2Page",
+    "pages/Auth/RegisterStep3Page",
+    "pages/Product/ProductDetailPage",
+    "pages/Product/PublishProductPage",
+    "pages/Product/MyPublishedProductsPage",
+    "pages/Chat/ChatDetailPage",
+    "pages/Cart/CartPage",
+    "pages/Order/CreateOrderPage",
+    "pages/Order/OrderListPage",
+    "pages/Order/OrderDetailPage",
+    "pages/Profile/ProfilePage",
+    "pages/Announcement/AnnouncementPage",
+    "pages/Admin/AdminDashboardPage",
+    "pages/Admin/AdminUsersPage",
+    "pages/Admin/AdminProductsPage",
+    "pages/Admin/AdminAnnouncementPage"
+  ]
+}
