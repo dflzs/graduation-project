@@ -10,3 +10,8 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+.superpowers/
+.tmp_kaiti/
+.hvigor/
+.idea/
+oh_modules/
