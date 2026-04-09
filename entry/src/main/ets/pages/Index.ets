@@ -1,10 +1,11 @@
-import { pushUrlByContext, showToastByContext } from '../utils/ui-context-actions';
+import { getParamsByContext, pushUrlByContext, showToastByContext } from '../utils/ui-context-actions';
 import { fileIo } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { appContext } from '../app/app-context';
 import { CartContent } from '../components/CartContent';
 import { uploadRemoteClient } from '../services/upload-remote.client';
 import { normalizeManualCoverUrl } from '../utils/cover-image';
+import { resolveIndexRouteTab } from '../utils/detail-return-route';
 import { MessageHubPage } from './Chat/MessageHubPage';
 import { HomePage } from './Home/HomePage';
 import { User } from '../types/domain';
@@ -30,12 +31,14 @@ struct Index {
   private messageHubUnsubscriber: (() => void) | null = null;
 
   aboutToAppear(): void {
+    this.applyRouteParams();
     this.refresh();
     this.bindShellNavigation();
     this.bindMessageHub();
   }
 
   onPageShow(): void {
+    this.applyRouteParams();
     this.refresh();
   }
 
@@ -56,6 +59,11 @@ struct Index {
     if (this.avatarLocalPath.length === 0 && this.avatarManualUrl.length === 0) {
       this.avatarPreviewUri = this.currentUser?.avatar ?? '';
     }
+  }
+
+  private applyRouteParams(): void {
+    const params = getParamsByContext<Record<string, string>>(this);
+    this.currentTab = resolveIndexRouteTab(params?.tab, this.currentTab);
   }
 
   private bindShellNavigation(): void {

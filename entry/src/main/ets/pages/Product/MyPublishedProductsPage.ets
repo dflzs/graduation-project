@@ -6,6 +6,7 @@ import { LoadingState } from '../../components/LoadingState';
 import { productRepository } from '../../repositories/product.repo';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { Product } from '../../types/domain';
+import { buildProductRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
@@ -254,7 +255,7 @@ struct MyPublishedProductsPage {
         } else {
           ForEach(this.products, (item: Product) => {
             this.buildProductCard(item)
-          }, (item: Product) => item.id)
+          }, (item: Product) => buildProductRenderKey(item))
         }
       }
       .padding({ left: 16, right: 16, top: 10, bottom: 18 })

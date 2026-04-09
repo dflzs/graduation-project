@@ -3,6 +3,7 @@ import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { userRepository } from '../../repositories/user.repo';
 import { User } from '../../types/domain';
+import { buildUserRenderKey } from '../../utils/render-keys';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const SURFACE_BACKGROUND: string = '#FFFDFC';
@@ -189,7 +190,7 @@ struct AdminUsersPage {
           Column({ space: 10 }) {
             ForEach(this.users, (item: User) => {
               this.buildUserCard(item)
-            }, (item: User) => item.id)
+            }, (item: User) => buildUserRenderKey(item))
           }
           .width('100%')
         }

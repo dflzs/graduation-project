@@ -4,6 +4,8 @@ import { productRepository } from '../../repositories/product.repo';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { Product, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
+import { canUserTradeProduct, isProductOwnedByUser } from '../../utils/trade-guard';
+import { canRequestRemoteProductDetail } from '../../utils/product-detail-source';
 
 const PRODUCT_PARAM_INVALID_TEXT: string = '\u5546\u54c1\u53c2\u6570\u65e0\u6548';
 const PRODUCT_LOAD_FAILED_TEXT: string = '\u5546\u54c1\u4e0d\u5b58\u5728\u6216\u52a0\u8f7d\u5931\u8d25';
@@ -109,6 +111,10 @@ function getStatusHintText(status: string): string {
   return '\u5546\u54c1\u72b6\u6001\u6682\u4e0d\u652f\u6301\u4ea4\u6613';
 }
 
+function getSelfOwnedHintText(): string {
+  return '\u8fd9\u662f\u4f60\u53d1\u5e03\u7684\u5546\u54c1\uff0c\u53ef\u5728\u201c\u6211\u53d1\u5e03\u7684\u201d\u4e2d\u67e5\u770b\u5ba1\u6838\u548c\u4ea4\u6613\u72b6\u6001';
+}
+
 function getPrimaryButtonText(status: string): string {
   if (status === 'pending_review') {
     return '\u5ba1\u6838\u4e2d\uff0c\u6682\u4e0d\u53ef\u4e0b\u5355';
@@ -178,22 +184,40 @@ struct ProductDetailPage {
       return;
     }
 
+    const localProduct: Product | null = productRepository.getById(this.productId);
+    if (localProduct) {
+      this.product = localProduct;
+      this.errorText = '';
+    }
+
+    if (!canRequestRemoteProductDetail(this.productId)) {
+      if (!localProduct) {
+        this.product = null;
+        this.errorText = PRODUCT_LOAD_FAILED_TEXT;
+      }
+      return;
+    }
+
     this.isLoading = true;
     try {
       const result = await remoteProductClient.getProductDetail(this.productId);
       if (!result.ok || !result.data) {
-        this.product = null;
-        this.errorText = result.message || PRODUCT_LOAD_FAILED_TEXT;
-        showToastByContext(this, { message: this.errorText, duration: 1800 });
+        if (!localProduct) {
+          this.product = null;
+          this.errorText = result.message || PRODUCT_LOAD_FAILED_TEXT;
+          showToastByContext(this, { message: this.errorText, duration: 1800 });
+        }
         return;
       }
 
       this.product = productRepository.mergeRemote(result.data);
       this.errorText = '';
     } catch (error) {
-      this.product = null;
-      this.errorText = PRODUCT_LOAD_FAILED_TEXT;
-      showToastByContext(this, { message: this.errorText, duration: 1800 });
+      if (!localProduct) {
+        this.product = null;
+        this.errorText = PRODUCT_LOAD_FAILED_TEXT;
+        showToastByContext(this, { message: this.errorText, duration: 1800 });
+      }
     } finally {
       this.isLoading = false;
     }
@@ -211,7 +235,15 @@ struct ProductDetailPage {
       return;
     }
 
-    if (!canTrade(this.product.status)) {
+    if (isProductOwnedByUser(this.product, user.id)) {
+      showToastByContext(this, {
+        message: '\u8fd9\u662f\u4f60\u53d1\u5e03\u7684\u5546\u54c1\uff0c\u4e0d\u9700\u8981\u518d\u52a0\u5165\u8d2d\u7269\u8f66',
+        duration: 1600
+      });
+      return;
+    }
+
+    if (!canUserTradeProduct(this.product, user.id)) {
       showToastByContext(this, {
         message: '\u5f53\u524d\u5546\u54c1\u4e0d\u53ef\u52a0\u5165\u8d2d\u7269\u8f66',
         duration: 1500
@@ -224,7 +256,23 @@ struct ProductDetailPage {
   }
 
   private orderNow(): void {
-    if (!this.product || !canTrade(this.product.status)) {
+    const currentUser: User | null = appContext.getCurrentUser();
+    if (!currentUser) {
+      showToastByContext(this, { message: '\u8bf7\u5148\u767b\u5f55', duration: 1500 });
+      pushUrlByContext(this, { url: 'pages/Auth/LoginPage' });
+      return;
+    }
+    if (!this.product) {
+      return;
+    }
+    if (isProductOwnedByUser(this.product, currentUser.id)) {
+      showToastByContext(this, {
+        message: '\u8fd9\u662f\u4f60\u53d1\u5e03\u7684\u5546\u54c1\uff0c\u4e0d\u80fd\u7ed9\u81ea\u5df1\u4e0b\u5355',
+        duration: 1600
+      });
+      return;
+    }
+    if (!canUserTradeProduct(this.product, currentUser.id)) {
       showToastByContext(this, {
         message: '\u5f53\u524d\u5546\u54c1\u4e0d\u53ef\u4e0b\u5355',
         duration: 1500
@@ -236,6 +284,14 @@ struct ProductDetailPage {
       url: 'pages/Order/CreateOrderPage',
       params: { productId: this.product.id }
     });
+  }
+
+  private currentUserOwnsProduct(product: Product): boolean {
+    return isProductOwnedByUser(product, appContext.getCurrentUser()?.id ?? '');
+  }
+
+  private canCurrentUserTrade(product: Product): boolean {
+    return canUserTradeProduct(product, appContext.getCurrentUser()?.id ?? '');
   }
 
   private contactSeller(): void {
@@ -446,7 +502,9 @@ struct ProductDetailPage {
           }
           .width('100%')
 
-          Text(getStatusHintText(product.status))
+          Text(isProductOwnedByUser(product, appContext.getCurrentUser()?.id ?? '')
+            ? getSelfOwnedHintText()
+            : getStatusHintText(product.status))
             .width('100%')
             .fontSize(14)
             .fontColor(SUB_TEXT_COLOR)
@@ -473,6 +531,34 @@ struct ProductDetailPage {
         .padding(18)
         .backgroundColor(CARD_BACKGROUND)
         .borderRadius(22)
+
+        if (isProductOwnedByUser(product, appContext.getCurrentUser()?.id ?? '')) {
+          Column({ space: 10 }) {
+            Text('\u5356\u5bb6\u63d0\u9192')
+              .width('100%')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(TITLE_COLOR)
+
+            Text(getSelfOwnedHintText())
+              .width('100%')
+              .fontSize(14)
+              .lineHeight(22)
+              .fontColor(SUB_TEXT_COLOR)
+
+            Button('\u53bb\u6211\u53d1\u5e03\u7684')
+              .width('100%')
+              .height(44)
+              .type(ButtonType.Normal)
+              .backgroundColor('#E8F0FF')
+              .fontColor('#2F6BFF')
+              .onClick(() => pushUrlByContext(this, { url: 'pages/Product/MyPublishedProductsPage' }))
+          }
+          .width('100%')
+          .padding(18)
+          .backgroundColor(CARD_BACKGROUND)
+          .borderRadius(22)
+        }
 
         Column({ space: 14 }) {
           Text('\u4ea4\u6613\u4fe1\u606f')
@@ -510,20 +596,20 @@ struct ProductDetailPage {
   @Builder
   private buildBottomBar(product: Product): void {
     Row({ space: 10 }) {
-      Button(getSecondaryButtonText(product.status))
+      Button(this.currentUserOwnsProduct(product) ? '\u81ea\u5df1\u7684\u5546\u54c1' : getSecondaryButtonText(product.status))
         .layoutWeight(1)
         .height(48)
-        .enabled(canTrade(product.status))
-        .backgroundColor(canTrade(product.status) ? '#E8F0FF' : DISABLED_BUTTON_COLOR)
-        .fontColor(canTrade(product.status) ? '#2F6BFF' : DISABLED_BUTTON_TEXT_COLOR)
+        .enabled(this.canCurrentUserTrade(product))
+        .backgroundColor(this.canCurrentUserTrade(product) ? '#E8F0FF' : DISABLED_BUTTON_COLOR)
+        .fontColor(this.canCurrentUserTrade(product) ? '#2F6BFF' : DISABLED_BUTTON_TEXT_COLOR)
         .onClick(() => this.addToCart())
 
-      Button(getPrimaryButtonText(product.status))
+      Button(this.currentUserOwnsProduct(product) ? '\u4e0d\u80fd\u81ea\u5df1\u4e0b\u5355' : getPrimaryButtonText(product.status))
         .layoutWeight(1)
         .height(48)
-        .enabled(canTrade(product.status))
-        .backgroundColor(canTrade(product.status) ? '#2F6BFF' : DISABLED_BUTTON_COLOR)
-        .fontColor(canTrade(product.status) ? '#FFFFFF' : DISABLED_BUTTON_TEXT_COLOR)
+        .enabled(this.canCurrentUserTrade(product))
+        .backgroundColor(this.canCurrentUserTrade(product) ? '#2F6BFF' : DISABLED_BUTTON_COLOR)
+        .fontColor(this.canCurrentUserTrade(product) ? '#FFFFFF' : DISABLED_BUTTON_TEXT_COLOR)
         .onClick(() => this.orderNow())
     }
     .width('100%')

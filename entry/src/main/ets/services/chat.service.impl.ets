@@ -7,6 +7,10 @@ import { newId } from '../utils/id';
 import { syncService } from './sync.service.impl';
 
 export class ChatServiceImpl implements ChatService {
+  private isThreadParticipant(thread: ChatThreadRecord, userId: string): boolean {
+    return userId === thread.buyerId || userId === thread.sellerId;
+  }
+
   listThreads(userId: string): ChatThread[] {
     return chatRepository.listThreads()
       .filter((thread: ChatThreadRecord) => thread.buyerId === userId || thread.sellerId === userId)
@@ -20,8 +24,8 @@ export class ChatServiceImpl implements ChatService {
   }
 
   getThread(threadId: string, viewerId: string): ChatThread | null {
-    const thread = chatRepository.getThreadById(threadId);
-    if (!thread) {
+    const thread: ChatThreadRecord | null = chatRepository.getThreadById(threadId);
+    if (!thread || !this.isThreadParticipant(thread, viewerId)) {
       return null;
     }
     return this.toThreadView(thread, viewerId);
@@ -36,12 +40,12 @@ export class ChatServiceImpl implements ChatService {
       return { ok: false, message: '会话参数不完整' };
     }
 
-    const existing = chatRepository.findThread(productId, buyerId, sellerId);
+    const existing: ChatThreadRecord | null = chatRepository.findThread(productId, buyerId, sellerId);
     if (existing) {
       return { ok: true, message: '会话已存在', data: existing.id };
     }
 
-    const now = Date.now();
+    const now: number = Date.now();
     const thread: ChatThreadRecord = {
       id: newId('thread'),
       productId,
@@ -61,13 +65,16 @@ export class ChatServiceImpl implements ChatService {
       return { ok: false, message: '消息内容不能为空' };
     }
 
-    const thread = chatRepository.getThreadById(threadId);
+    const thread: ChatThreadRecord | null = chatRepository.getThreadById(threadId);
     if (!thread) {
       return { ok: false, message: '会话不存在' };
     }
+    if (!this.isThreadParticipant(thread, fromUserId)) {
+      return { ok: false, message: '仅交易双方可发送消息' };
+    }
 
-    const toUserId = fromUserId === thread.buyerId ? thread.sellerId : thread.buyerId;
-    const createdAt = Date.now();
+    const toUserId: string = fromUserId === thread.buyerId ? thread.sellerId : thread.buyerId;
+    const createdAt: number = Date.now();
     const message: ChatMessage = {
       id: newId('chat'),
       threadId,
@@ -102,17 +109,23 @@ export class ChatServiceImpl implements ChatService {
     if (threadId.trim().length === 0 || viewerId.trim().length === 0) {
       return;
     }
+
+    const thread: ChatThreadRecord | null = chatRepository.getThreadById(threadId);
+    if (!thread || !this.isThreadParticipant(thread, viewerId)) {
+      return;
+    }
+
     chatRepository.markMessagesRead(threadId, viewerId);
     this.publishMessageChange(viewerId);
   }
 
   private toThreadView(thread: ChatThreadRecord, viewerId: string): ChatThread {
     const product = productRepository.getById(thread.productId);
-    const peerUserId = viewerId === thread.buyerId ? thread.sellerId : thread.buyerId;
+    const peerUserId: string = viewerId === thread.buyerId ? thread.sellerId : thread.buyerId;
     const peer = userRepository.getById(peerUserId);
-    const messages = chatRepository.listMessages(thread.id);
-    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-    const unreadCount = messages.filter((item: ChatMessage) => item.toUserId === viewerId && !item.isRead).length;
+    const messages: ChatMessage[] = chatRepository.listMessages(thread.id);
+    const lastMessage: ChatMessage | null = messages.length > 0 ? messages[messages.length - 1] : null;
+    const unreadCount: number = messages.filter((item: ChatMessage) => item.toUserId === viewerId && !item.isRead).length;
 
     return {
       id: thread.id,

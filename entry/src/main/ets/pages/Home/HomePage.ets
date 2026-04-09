@@ -7,7 +7,8 @@ import { PRODUCT_CATEGORIES } from '../../constants/config';
 import { productRepository } from '../../repositories/product.repo';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { Announcement, Product, User } from '../../types/domain';
-import { mergeKnownRemoteProductIds } from '../../utils/product-feed';
+import { resolveVisibleRemoteHomeProducts } from '../../utils/product-feed';
+import { buildProductRowRenderKey } from '../../utils/render-keys';
 
 const DEFAULT_EMPTY_TEXT: string = '\u6682\u65e0\u5546\u54c1';
 const LOAD_FAILED_TEXT: string = '\u5546\u54c1\u52a0\u8f7d\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5';
@@ -115,6 +116,7 @@ export struct HomePage {
     try {
       const result = await remoteProductClient.listProducts({ status: 'on_sale' });
       if (!result.ok || !result.data) {
+        this.knownRemoteProductIds = [];
         this.refreshProductsFromLocalState();
         this.errorText = this.allProducts.length === 0 ? (result.message || LOAD_FAILED_TEXT) : '';
         showToastByContext(this, {
@@ -125,10 +127,11 @@ export struct HomePage {
       }
 
       const savedProducts: Product[] = result.data.map((item: Product) => productRepository.mergeRemote(item));
-      this.knownRemoteProductIds = mergeKnownRemoteProductIds(this.knownRemoteProductIds, savedProducts);
+      this.knownRemoteProductIds = savedProducts.map((item: Product) => item.id);
       this.refreshProductsFromLocalState();
       this.errorText = '';
     } catch (error) {
+      this.knownRemoteProductIds = [];
       this.refreshProductsFromLocalState();
       this.errorText = this.allProducts.length === 0 ? LOAD_FAILED_TEXT : '';
       showToastByContext(this, {
@@ -141,23 +144,7 @@ export struct HomePage {
   }
 
   private refreshProductsFromLocalState(): void {
-    const localProducts: Product[] = [];
-    if (this.knownRemoteProductIds.length === 0) {
-      productRepository.list().forEach((product: Product) => {
-        if (!product.isDeleted) {
-          localProducts.push(product);
-        }
-      });
-    } else {
-      this.knownRemoteProductIds.forEach((productId: string) => {
-        const product: Product | null = productRepository.getById(productId);
-        if (product && !product.isDeleted) {
-          localProducts.push(product);
-        }
-      });
-    }
-
-    this.allProducts = localProducts.sort((a: Product, b: Product) => b.createdAt - a.createdAt);
+    this.allProducts = resolveVisibleRemoteHomeProducts(productRepository.list(), this.knownRemoteProductIds);
     this.applyFilters();
   }
 
@@ -536,7 +523,7 @@ export struct HomePage {
                   }
                 }
                 .width('100%')
-              }, (row: Product[]) => row[0].id)
+              }, (row: Product[]) => buildProductRowRenderKey(row))
             }
           }
           .width('100%')

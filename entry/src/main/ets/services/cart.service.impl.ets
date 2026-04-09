@@ -2,6 +2,7 @@
 import { productRepository } from '../repositories/product.repo';
 import { CartItem, OperationResult, Product } from '../types/domain';
 import { newId } from '../utils/id';
+import { isProductOwnedByUser } from '../utils/trade-guard';
 import { syncService } from './sync.service.impl';
 
 export class CartServiceImpl {
@@ -14,6 +15,9 @@ export class CartServiceImpl {
     const product: Product | null = productRepository.getById(productId);
     if (!product || product.isDeleted || product.status !== 'on_sale') {
       return { ok: false, message: '商品不可加入购物车' };
+    }
+    if (isProductOwnedByUser(product, userId)) {
+      return { ok: false, message: '不能购买自己发布的商品' };
     }
 
     const existed: CartItem | null = cartRepository.getByUserAndProduct(userId, productId);

@@ -6,6 +6,7 @@ import { productRepository } from '../main/ets/repositories/product.repo';
 import { orderRepository } from '../main/ets/repositories/order.repo';
 import { canAccessAdmin } from '../main/ets/services/guard.service';
 import { AuthServiceImpl, authService } from '../main/ets/services/auth.service.impl';
+import { cartService } from '../main/ets/services/cart.service.impl';
 import { productService } from '../main/ets/services/product.service.impl';
 import { orderService } from '../main/ets/services/order.service.impl';
 import { announcementService } from '../main/ets/services/announcement.service.impl';
@@ -13,7 +14,7 @@ import { AuthStateService, authStateService } from '../main/ets/services/auth-st
 import { userRepository } from '../main/ets/repositories/user.repo';
 import { notificationService } from '../main/ets/services/notification.service.impl';
 import { chatService } from '../main/ets/services/chat.service.impl';
-import { CartItem, Order, OrderStatus, User } from '../main/ets/types/domain';
+import { CartItem, Order, OrderStatus, Product, User } from '../main/ets/types/domain';
 import { syncService } from '../main/ets/services/sync.service.impl';
 import {
   RemoteAuthClient,
@@ -60,13 +61,35 @@ import {
   UiContextPromptLike,
   UiContextRouterLike
 } from '../main/ets/utils/ui-context-actions';
-import { mergeKnownRemoteProductIds } from '../main/ets/utils/product-feed';
+import { mergeKnownRemoteProductIds, resolveVisibleRemoteHomeProducts } from '../main/ets/utils/product-feed';
 import { normalizeUploadedImageUrl, resolveUploadMimeType } from '../main/ets/services/upload-remote.client';
 import { LocalDb } from '../main/ets/data/db/local-db';
 import { MemoryPersistenceAdapter } from '../main/ets/data/db/persistence-adapter';
 import { RemoteCreateProductPayload } from '../main/ets/types/product-remote';
 import { normalizeManualCoverUrl } from '../main/ets/utils/cover-image';
 import { RemoteUpdateMePayload } from '../main/ets/types/auth-remote';
+import { canRequestRemoteProductDetail } from '../main/ets/utils/product-detail-source';
+import { canUserAccessOrder } from '../main/ets/utils/trade-guard';
+import { buildOrderDetailReturnTarget, resolveIndexRouteTab } from '../main/ets/utils/detail-return-route';
+import {
+  buildAnnouncementRenderKey,
+  buildOrderRenderKey,
+  buildProductRenderKey,
+  buildProductRowRenderKey,
+  buildReminderRenderKey,
+  buildThreadRenderKey,
+  buildUserRenderKey
+} from '../main/ets/utils/render-keys';
+import {
+  getAuthHeroSurfaceTone,
+  getAuthInputSurfaceTone,
+  getAuthSymmetricSplitButtonLayout,
+  getPolishDangerButtonTone,
+  getPolishGhostButtonTone,
+  getPolishNeutralButtonTone,
+  getPolishPrimaryButtonTone,
+  getPolishSecondaryButtonTone
+} from '../main/ets/utils/ui-polish-tokens';
 
 class FakeRemoteAuthClient implements RemoteAuthClient {
   sendLoginCodeCalled: boolean = false;
@@ -586,6 +609,28 @@ export default function localUnitTest() {
       expect(notificationService.countUnread(userId)).assertEqual(0);
     });
 
+    it('notification_service_should_publish_message_change_when_marking_read', 0, () => {
+      const userId = `notify-sync-${Date.now()}`;
+      const syncValues: string[] = [];
+      const unsubscribe = syncService.subscribe('messages:changed', (payload) => {
+        syncValues.push(payload.value);
+      });
+
+      const created = notificationService.create(
+        userId,
+        'order_created',
+        '提醒同步测试',
+        '验证标记已读会广播消息变更',
+        'order-sync-1'
+      );
+      expect(created.ok).assertTrue();
+
+      notificationService.markRead(created.data!.id);
+      expect(syncValues.length > 0).assertTrue();
+
+      unsubscribe();
+    });
+
     it('chat_service_should_create_or_reuse_product_bound_threads_and_store_messages', 0, async () => {
       const timestamp: string = Date.now().toString().slice(-8);
       const sellerPhone: string = buildTestPhone('183', timestamp, 0);
@@ -726,6 +771,49 @@ export default function localUnitTest() {
       expect(threadAfterRead?.unreadCount).assertEqual(0);
     });
 
+    it('chat_service_should_reject_non_participant_thread_access_and_messages', 0, async () => {
+      const timestamp: string = Date.now().toString().slice(-8);
+      const sellerPhone: string = buildTestPhone('181', timestamp, 0);
+      const buyerPhone: string = buildTestPhone('171', timestamp, 1);
+      const outsiderPhone: string = buildTestPhone('161', timestamp, 2);
+      const testAuthService = new AuthServiceImpl(new FakeRemoteAuthClient());
+
+      const sellerLogin = await testAuthService.loginByPhone(sellerPhone, '123456');
+      expect(sellerLogin.ok).assertTrue();
+      const seller = sellerLogin.data!.currentUser;
+
+      const createProduct = productService.createProduct({
+        title: '越权会话防呆测试商品',
+        desc: '不应允许非交易双方查看或发送消息',
+        price: 42,
+        category: '电子数码',
+        locationTag: '图书馆门口',
+        images: []
+      }, seller.id);
+      expect(createProduct.ok).assertTrue();
+      const product = createProduct.data!;
+      productRepository.updateStatus(product.id, 'on_sale');
+
+      testAuthService.logout();
+      const buyerLogin = await testAuthService.loginByPhone(buyerPhone, '123456');
+      expect(buyerLogin.ok).assertTrue();
+      const buyer = buyerLogin.data!.currentUser;
+
+      const threadResult = chatService.openProductThread(product.id, buyer.id, seller.id);
+      expect(threadResult.ok).assertTrue();
+      expect(chatService.sendMessage(threadResult.data!, buyer.id, '这件商品还在吗？').ok).assertTrue();
+
+      testAuthService.logout();
+      const outsiderLogin = await testAuthService.loginByPhone(outsiderPhone, '123456');
+      expect(outsiderLogin.ok).assertTrue();
+      const outsider = outsiderLogin.data!.currentUser;
+
+      expect(chatService.getThread(threadResult.data!, outsider.id)).assertNull();
+      const blockedSend = chatService.sendMessage(threadResult.data!, outsider.id, '我也想买');
+      expect(blockedSend.ok).assertFalse();
+      expect(blockedSend.message).assertEqual('仅交易双方可发送消息');
+    });
+
     it('message_quick_replies_should_expose_campus_trade_phrases', 0, () => {
       expect(CAMPUS_TRADE_QUICK_REPLIES.length >= 4).assertTrue();
       expect(CAMPUS_TRADE_QUICK_REPLIES.includes('还在吗？')).assertTrue();
@@ -772,6 +860,46 @@ export default function localUnitTest() {
       expect(mergedWithNewProduct.length).assertEqual(2);
       expect(mergedWithNewProduct[0]).assertEqual('remote-product-1');
       expect(mergedWithNewProduct[1]).assertEqual('remote-product-2');
+    });
+
+    it('product_feed_should_only_show_products_backed_by_current_remote_ids', 0, () => {
+      const now = Date.now();
+      const products: Product[] = [
+        {
+          id: 'p_1',
+          sellerId: 'seed-seller',
+          title: '本地教材',
+          desc: '本地种子商品',
+          price: 28,
+          category: '教材书籍',
+          images: [],
+          locationTag: '图书馆大厅',
+          status: 'on_sale',
+          isDeleted: false,
+          createdAt: now,
+          updatedAt: now
+        },
+        {
+          id: '12',
+          sellerId: 'remote-seller',
+          title: '云端商品',
+          desc: '云端在售商品',
+          price: 66,
+          category: '电子数码',
+          images: [],
+          locationTag: '教学楼大厅',
+          status: 'on_sale',
+          isDeleted: false,
+          createdAt: now + 1,
+          updatedAt: now + 1
+        }
+      ];
+
+      expect(resolveVisibleRemoteHomeProducts(products, []).length).assertEqual(0);
+
+      const visibleProducts = resolveVisibleRemoteHomeProducts(products, ['12']);
+      expect(visibleProducts.length).assertEqual(1);
+      expect(visibleProducts[0].id).assertEqual('12');
     });
 
     it('product_repository_should_allow_local_status_restore_from_locked_to_on_sale', 0, () => {
@@ -962,6 +1090,49 @@ export default function localUnitTest() {
       unsubscribe();
     });
 
+    it('order_service_should_publish_orders_changed_when_status_changes', 0, async () => {
+      const orderSignals: string[] = [];
+      const unsubscribe = syncService.subscribe('orders:changed', (payload) => {
+        orderSignals.push(payload.value);
+      });
+
+      const timestamp: string = Date.now().toString().slice(-8);
+      const sellerPhone: string = buildTestPhone('187', timestamp, 0);
+      const buyerPhone: string = buildTestPhone('177', timestamp, 1);
+      const testAuthService = new AuthServiceImpl(new FakeRemoteAuthClient());
+
+      const sellerLogin = await testAuthService.loginByPhone(sellerPhone, '123456');
+      expect(sellerLogin.ok).assertTrue();
+      const seller = sellerLogin.data!.currentUser;
+
+      const createProduct = productService.createProduct({
+        title: '订单同步测试商品',
+        desc: '验证订单状态变化会广播列表刷新信号',
+        price: 48,
+        category: '电子数码',
+        locationTag: '教学楼大厅',
+        images: []
+      }, seller.id);
+      expect(createProduct.ok).assertTrue();
+      const product = createProduct.data!;
+      productRepository.updateStatus(product.id, 'on_sale');
+
+      testAuthService.logout();
+      const buyerLogin = await testAuthService.loginByPhone(buyerPhone, '123456');
+      expect(buyerLogin.ok).assertTrue();
+      const buyer = buyerLogin.data!.currentUser;
+
+      const orderResult = orderService.createOrder(buyer.id, product.id, '宿舍楼下');
+      expect(orderResult.ok).assertTrue();
+      expect(orderSignals.includes('PENDING_PAYMENT')).assertTrue();
+
+      const cancelResult = orderService.cancelOrder(orderResult.data!.id, buyer.id);
+      expect(cancelResult.ok).assertTrue();
+      expect(orderSignals.includes('CANCELED')).assertTrue();
+
+      unsubscribe();
+    });
+
     it('credit_score_should_follow_formula', 0, () => {
       expect(calculateCreditScore(0, 3)).assertEqual(72);
       expect(calculateCreditScore(25, 5)).assertEqual(100);
@@ -1052,6 +1223,92 @@ export default function localUnitTest() {
       const latestSeller = userRepository.getById(seller.id);
       expect(latestSeller !== null).assertTrue();
       expect((latestSeller?.creditScore ?? 0) > 60).assertTrue();
+    });
+
+    it('cart_service_should_reject_adding_self_owned_product', 0, async () => {
+      const timestamp: string = Date.now().toString().slice(-8);
+      const sellerPhone: string = buildTestPhone('185', timestamp, 0);
+      const testAuthService = new AuthServiceImpl(new FakeRemoteAuthClient());
+
+      const sellerLogin = await testAuthService.loginByPhone(sellerPhone, '123456');
+      expect(sellerLogin.ok).assertTrue();
+      const seller = sellerLogin.data!.currentUser;
+
+      const createProduct = productService.createProduct({
+        title: '自购防呆测试商品',
+        desc: '不应允许加入自己的购物车',
+        price: 28,
+        category: '教材书籍',
+        locationTag: '图书馆大厅',
+        images: []
+      }, seller.id);
+      expect(createProduct.ok).assertTrue();
+
+      const product = createProduct.data!;
+      productRepository.updateStatus(product.id, 'on_sale');
+
+      const addResult = cartService.addToCart(seller.id, product.id);
+      expect(addResult.ok).assertFalse();
+      expect(addResult.message).assertEqual('不能购买自己发布的商品');
+    });
+
+    it('product_detail_should_only_request_remote_for_numeric_product_id', 0, () => {
+      expect(canRequestRemoteProductDetail('p_1')).assertFalse();
+      expect(canRequestRemoteProductDetail(' local-product ')).assertFalse();
+      expect(canRequestRemoteProductDetail('12')).assertTrue();
+      expect(canRequestRemoteProductDetail(' 345 ')).assertTrue();
+    });
+
+    it('order_access_guard_should_only_allow_buyer_or_seller', 0, () => {
+      const now = Date.now();
+      const order: Order = {
+        id: 'order-access-1',
+        productId: 'product-access-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆门口',
+        locationTag: '图书馆门口',
+        payType: 'simulated',
+        status: OrderStatus.PENDING_PAYMENT,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      expect(canUserAccessOrder(order, 'buyer-1')).assertTrue();
+      expect(canUserAccessOrder(order, 'seller-1')).assertTrue();
+      expect(canUserAccessOrder(order, 'outsider')).assertFalse();
+      expect(canUserAccessOrder(null, 'buyer-1')).assertFalse();
+    });
+
+    it('order_service_should_reject_buying_self_owned_product', 0, async () => {
+      const timestamp: string = Date.now().toString().slice(-8);
+      const sellerPhone: string = buildTestPhone('184', timestamp, 0);
+      const testAuthService = new AuthServiceImpl(new FakeRemoteAuthClient());
+
+      const sellerLogin = await testAuthService.loginByPhone(sellerPhone, '123456');
+      expect(sellerLogin.ok).assertTrue();
+      const seller = sellerLogin.data!.currentUser;
+
+      const createProduct = productService.createProduct({
+        title: '自购下单防呆测试商品',
+        desc: '不应允许给自己下单',
+        price: 35,
+        category: '电子数码',
+        locationTag: '教学楼大厅',
+        images: []
+      }, seller.id);
+      expect(createProduct.ok).assertTrue();
+
+      const product = createProduct.data!;
+      productRepository.updateStatus(product.id, 'on_sale');
+
+      const orderResult = orderService.createOrder(seller.id, product.id, '教学楼大厅');
+      expect(orderResult.ok).assertFalse();
+      expect(orderResult.message).assertEqual('不能购买自己发布的商品');
     });
 
     it('announcement_service_should_support_delete', 0, () => {
@@ -1164,6 +1421,286 @@ export default function localUnitTest() {
       expect(restoredSession !== null).assertTrue();
       expect(restoredSession?.currentUser.nickname).assertEqual('校园新昵称');
       expect(restoredSession?.currentUser.avatar).assertEqual('http://49.232.30.147/uploads/avatar/demo.png');
+    });
+
+    it('detail_return_route_should_send_message_source_back_to_message_tab', 0, () => {
+      const messageTarget = buildOrderDetailReturnTarget('message');
+      const listTarget = buildOrderDetailReturnTarget('list');
+      const createTarget = buildOrderDetailReturnTarget('create');
+      const unknownTarget = buildOrderDetailReturnTarget('unknown');
+
+      expect(messageTarget?.url).assertEqual('pages/Index');
+      expect(messageTarget?.params?.tab).assertEqual('message');
+      expect(listTarget?.url).assertEqual('pages/Order/OrderListPage');
+      expect(createTarget?.url).assertEqual('pages/Order/OrderListPage');
+      expect(unknownTarget === null).assertTrue();
+    });
+
+    it('index_route_tab_should_only_override_when_tab_param_is_known', 0, () => {
+      expect(resolveIndexRouteTab('home', 4)).assertEqual(0);
+      expect(resolveIndexRouteTab('message', 0)).assertEqual(1);
+      expect(resolveIndexRouteTab('mine', 0)).assertEqual(4);
+      expect(resolveIndexRouteTab(undefined, 3)).assertEqual(3);
+      expect(resolveIndexRouteTab('unknown', 1)).assertEqual(1);
+    });
+
+    it('render_keys_should_change_when_ui_status_changes', 0, () => {
+      const reminderReadKey = buildReminderRenderKey({
+        id: 'n-1',
+        userId: 'u-1',
+        type: 'order_canceled',
+        title: '订单已取消',
+        summary: '测试提醒',
+        relatedId: 'order-1',
+        isRead: true,
+        createdAt: 1
+      });
+      const reminderUnreadKey = buildReminderRenderKey({
+        id: 'n-1',
+        userId: 'u-1',
+        type: 'order_canceled',
+        title: '订单已取消',
+        summary: '测试提醒',
+        relatedId: 'order-1',
+        isRead: false,
+        createdAt: 1
+      });
+
+      const orderPendingKey = buildOrderRenderKey({
+        id: 'order-1',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆门口',
+        locationTag: '图书馆门口',
+        payType: 'simulated',
+        status: OrderStatus.PENDING_PAYMENT,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      const orderCanceledKey = buildOrderRenderKey({
+        id: 'order-1',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆门口',
+        locationTag: '图书馆门口',
+        payType: 'simulated',
+        status: OrderStatus.CANCELED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 3
+      });
+
+      const threadUnreadKey = buildThreadRenderKey({
+        id: 'thread-1',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        peerUserId: 'seller-1',
+        peerNickname: '卖家',
+        productTitle: '测试商品',
+        lastMessage: '你好',
+        lastMessageAt: 2,
+        unreadCount: 1
+      });
+      const threadReadKey = buildThreadRenderKey({
+        id: 'thread-1',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        peerUserId: 'seller-1',
+        peerNickname: '卖家',
+        productTitle: '测试商品',
+        lastMessage: '你好',
+        lastMessageAt: 3,
+        unreadCount: 0
+      });
+
+      const productSaleKey = buildProductRenderKey({
+        id: 'product-1',
+        sellerId: 'seller-1',
+        title: '测试商品',
+        desc: '测试描述',
+        price: 88,
+        category: '教材书籍',
+        images: [],
+        locationTag: '图书馆大厅',
+        status: 'on_sale',
+        isDeleted: false,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      const productSoldKey = buildProductRenderKey({
+        id: 'product-1',
+        sellerId: 'seller-1',
+        title: '测试商品',
+        desc: '测试描述',
+        price: 88,
+        category: '教材书籍',
+        images: [],
+        locationTag: '图书馆大厅',
+        status: 'sold',
+        isDeleted: false,
+        createdAt: 1,
+        updatedAt: 3
+      });
+
+      const userActiveKey = buildUserRenderKey({
+        id: 'user-1',
+        phone: '18800000001',
+        nickname: '测试用户',
+        role: 'user',
+        status: 'active',
+        creditScore: 80,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      const userBannedKey = buildUserRenderKey({
+        id: 'user-1',
+        phone: '18800000001',
+        nickname: '测试用户',
+        role: 'user',
+        status: 'banned',
+        creditScore: 80,
+        createdAt: 1,
+        updatedAt: 3
+      });
+
+      const announcementOldKey = buildAnnouncementRenderKey({
+        id: 'announcement-1',
+        title: '旧公告',
+        content: '旧内容',
+        publisherId: 'admin-1',
+        isDeleted: false,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      const announcementNewKey = buildAnnouncementRenderKey({
+        id: 'announcement-1',
+        title: '新公告',
+        content: '新内容',
+        publisherId: 'admin-1',
+        isDeleted: false,
+        createdAt: 1,
+        updatedAt: 3
+      });
+
+      const productRowBefore = buildProductRowRenderKey([
+        {
+          id: 'product-1',
+          sellerId: 'seller-1',
+          title: '测试商品1',
+          desc: '测试描述',
+          price: 18,
+          category: '教材书籍',
+          images: [],
+          locationTag: '图书馆大厅',
+          status: 'on_sale',
+          isDeleted: false,
+          createdAt: 1,
+          updatedAt: 2
+        },
+        {
+          id: 'product-2',
+          sellerId: 'seller-2',
+          title: '测试商品2',
+          desc: '测试描述',
+          price: 28,
+          category: '电子数码',
+          images: [],
+          locationTag: '教学楼大厅',
+          status: 'on_sale',
+          isDeleted: false,
+          createdAt: 1,
+          updatedAt: 2
+        }
+      ]);
+      const productRowAfter = buildProductRowRenderKey([
+        {
+          id: 'product-1',
+          sellerId: 'seller-1',
+          title: '测试商品1',
+          desc: '测试描述',
+          price: 18,
+          category: '教材书籍',
+          images: [],
+          locationTag: '图书馆大厅',
+          status: 'on_sale',
+          isDeleted: false,
+          createdAt: 1,
+          updatedAt: 2
+        },
+        {
+          id: 'product-2',
+          sellerId: 'seller-2',
+          title: '测试商品2',
+          desc: '测试描述',
+          price: 28,
+          category: '电子数码',
+          images: [],
+          locationTag: '教学楼大厅',
+          status: 'locked',
+          isDeleted: false,
+          createdAt: 1,
+          updatedAt: 3
+        }
+      ]);
+
+      expect(reminderReadKey === reminderUnreadKey).assertFalse();
+      expect(orderPendingKey === orderCanceledKey).assertFalse();
+      expect(threadUnreadKey === threadReadKey).assertFalse();
+      expect(productSaleKey === productSoldKey).assertFalse();
+      expect(userActiveKey === userBannedKey).assertFalse();
+      expect(announcementOldKey === announcementNewKey).assertFalse();
+      expect(productRowBefore === productRowAfter).assertFalse();
+    });
+
+    it('ui_polish_button_tones_should_keep_primary_secondary_and_danger_consistent', 0, () => {
+      const primary = getPolishPrimaryButtonTone();
+      const secondary = getPolishSecondaryButtonTone();
+      const danger = getPolishDangerButtonTone();
+      const neutral = getPolishNeutralButtonTone();
+      const ghost = getPolishGhostButtonTone();
+
+      expect(primary.backgroundColor).assertEqual('#2F6BFF');
+      expect(primary.textColor).assertEqual('#FFFFFF');
+      expect(secondary.backgroundColor).assertEqual('#EDF3FF');
+      expect(secondary.textColor).assertEqual('#2F6BFF');
+      expect(danger.backgroundColor).assertEqual('#FFF4EF');
+      expect(danger.textColor).assertEqual('#B8643C');
+      expect(neutral.borderColor).assertEqual('#E4DACF');
+      expect(ghost.backgroundColor).assertEqual(neutral.backgroundColor);
+      expect(ghost.textColor).assertEqual(neutral.textColor);
+      expect(primary.height).assertEqual(danger.height);
+      expect(primary.radius).assertEqual(secondary.radius);
+      expect(secondary.radius).assertEqual(neutral.radius);
+    });
+
+    it('auth_ui_polish_tones_should_define_hero_and_input_surfaces', 0, () => {
+      const heroTone = getAuthHeroSurfaceTone();
+      const inputTone = getAuthInputSurfaceTone();
+
+      expect(heroTone.backgroundColor).assertEqual('#FFFCF8');
+      expect(heroTone.borderColor).assertEqual('#E4D9CC');
+      expect(inputTone.backgroundColor).assertEqual('#FFFFFF');
+      expect(inputTone.borderColor).assertEqual('#E5DDD1');
+      expect(heroTone.radius > inputTone.radius).assertTrue();
+    });
+
+    it('auth_ui_split_buttons_should_stay_centered_and_symmetric', 0, () => {
+      const layout = getAuthSymmetricSplitButtonLayout();
+
+      expect(layout.leftWeight).assertEqual(layout.rightWeight);
+      expect(layout.leftWeight).assertEqual(1);
+      expect(layout.gap).assertEqual(12);
     });
   });
 }

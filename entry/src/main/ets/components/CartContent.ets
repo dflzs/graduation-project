@@ -4,8 +4,6 @@ import { EmptyState } from './EmptyState';
 import { CartItem, Product, User } from '../types/domain';
 import {
   calculateSelectedCartAmount,
-  getAllSelectedCartItemIds,
-  isCartAllSelected,
   resolveCartCheckoutState,
   syncSelectedCartItemIds
 } from '../utils/cart-selection';
@@ -13,6 +11,7 @@ import {
   getCartCardBackground,
   getCartCardBorder
 } from '../utils/cart-visuals';
+import { canUserTradeProduct, isProductOwnedByUser } from '../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -88,11 +87,17 @@ export struct CartContent {
 
     this.cartItems = appContext.cart.listByUser(this.currentUser.id);
     this.selectedItemIds = syncSelectedCartItemIds(this.cartItems, previousSelectedIds);
+    if (!this.manageMode) {
+      this.selectedItemIds = this.selectedItemIds.filter((itemId: string) => {
+        const cartItem = this.cartItems.find((item: CartItem) => item.id === itemId);
+        return !!cartItem && this.canSettleItem(cartItem);
+      });
+    }
 
     if (previousCartIds.length === 0 && this.cartItems.length > 0 && this.selectedItemIds.length === 0) {
-      this.selectedItemIds = getAllSelectedCartItemIds(this.cartItems);
+      this.selectedItemIds = this.getSelectableItemIds();
     } else if (hadAllSelected && this.cartItems.length > previousCartIds.length) {
-      this.selectedItemIds = getAllSelectedCartItemIds(this.cartItems);
+      this.selectedItemIds = this.getSelectableItemIds();
     }
 
     if (this.cartItems.length === 0) {
@@ -102,6 +107,25 @@ export struct CartContent {
 
   private getProduct(item: CartItem): Product | null {
     return appContext.product.getProductById(item.productId);
+  }
+
+  private canSettleItem(item: CartItem): boolean {
+    const userId: string = this.currentUser?.id ?? '';
+    return canUserTradeProduct(this.getProduct(item), userId);
+  }
+
+  private isSelfOwnedCartItem(item: CartItem): boolean {
+    const userId: string = this.currentUser?.id ?? '';
+    return isProductOwnedByUser(this.getProduct(item), userId);
+  }
+
+  private getSelectableItemIds(): string[] {
+    if (this.manageMode) {
+      return this.cartItems.map((item: CartItem) => item.id);
+    }
+    return this.cartItems
+      .filter((item: CartItem) => this.canSettleItem(item))
+      .map((item: CartItem) => item.id);
   }
 
   private getProductTitle(item: CartItem): string {
@@ -121,6 +145,9 @@ export struct CartContent {
     if (!product) {
       return '已失效';
     }
+    if (this.isSelfOwnedCartItem(item)) {
+      return '自己发布';
+    }
     if (product.status === 'on_sale') {
       return '在售';
     }
@@ -137,6 +164,9 @@ export struct CartContent {
   }
 
   private getItemStatusColor(item: CartItem): string {
+    if (this.isSelfOwnedCartItem(item)) {
+      return '#B8643C';
+    }
     const status: string = this.getProduct(item)?.status ?? '';
     if (status === 'on_sale') {
       return '#237B46';
@@ -151,6 +181,9 @@ export struct CartContent {
   }
 
   private getItemStatusBackground(item: CartItem): string {
+    if (this.isSelfOwnedCartItem(item)) {
+      return '#F4E6DE';
+    }
     const status: string = this.getProduct(item)?.status ?? '';
     if (status === 'on_sale') {
       return '#E8F5EA';
@@ -181,7 +214,11 @@ export struct CartContent {
   }
 
   private isAllSelected(): boolean {
-    return isCartAllSelected(this.cartItems, this.selectedItemIds);
+    const selectableIds: string[] = this.getSelectableItemIds();
+    if (selectableIds.length === 0) {
+      return false;
+    }
+    return selectableIds.every((itemId: string) => this.selectedItemIds.includes(itemId));
   }
 
   private getCartItemRenderKey(itemId: string): string {
@@ -189,6 +226,11 @@ export struct CartContent {
   }
 
   private setItemSelection(itemId: string, selected: boolean): void {
+    const targetItem: CartItem | undefined = this.cartItems.find((item: CartItem) => item.id === itemId);
+    if (!this.manageMode && targetItem && !this.canSettleItem(targetItem)) {
+      return;
+    }
+
     if (selected) {
       if (!this.isSelected(itemId)) {
         this.selectedItemIds = [...this.selectedItemIds, itemId];
@@ -203,7 +245,7 @@ export struct CartContent {
 
   private setAllSelection(selected: boolean): void {
     if (selected) {
-      this.selectedItemIds = getAllSelectedCartItemIds(this.cartItems);
+      this.selectedItemIds = this.getSelectableItemIds();
       return;
     }
 
@@ -218,6 +260,16 @@ export struct CartContent {
   }
 
   private toggleSelect(itemId: string): void {
+    const targetItem: CartItem | undefined = this.cartItems.find((item: CartItem) => item.id === itemId);
+    if (!this.manageMode && targetItem && !this.canSettleItem(targetItem)) {
+      showToastByContext(this, {
+        message: this.isSelfOwnedCartItem(targetItem)
+          ? '这是你发布的商品，请切换到管理后删除'
+          : '当前商品暂不可结算，请重新选择',
+        duration: 1500
+      });
+      return;
+    }
     this.setItemSelection(itemId, !this.isSelected(itemId));
   }
 
@@ -282,6 +334,14 @@ export struct CartContent {
       showToastByContext(this, { message: '没有找到对应商品，请重新选择', duration: 1200 });
       return;
     }
+    if (this.isSelfOwnedCartItem(selectedItem)) {
+      showToastByContext(this, { message: '这是你发布的商品，请先从购物车移除', duration: 1600 });
+      return;
+    }
+    if (!this.canSettleItem(selectedItem)) {
+      showToastByContext(this, { message: '当前商品暂不可结算，请重新选择', duration: 1500 });
+      return;
+    }
 
     pushUrlByContext(this, {
       url: 'pages/Order/CreateOrderPage',
@@ -296,6 +356,7 @@ export struct CartContent {
       .width(18)
       .height(18)
       .margin({ top: 2 })
+      .enabled(this.manageMode || !!this.cartItems.find((item: CartItem) => item.id === itemId && this.canSettleItem(item)))
       .onChange((value: boolean) => this.setItemSelection(itemId, value))
   }
 

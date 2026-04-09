@@ -1,6 +1,7 @@
-﻿import { getParamsByContext, pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
+import { backByContext, getParamsByContext, pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
 import { Product, User } from '../../types/domain';
+import { canUserTradeProduct, isProductOwnedByUser } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -24,6 +25,23 @@ struct CreateOrderPage {
     const params = getParamsByContext<Record<string, string>>(this);
     this.productId = params?.productId ?? '';
     this.product = appContext.product.getProductById(this.productId);
+    this.guardEntry();
+  }
+
+  private guardEntry(): void {
+    const user: User | null = appContext.getCurrentUser();
+    if (!user || !this.product) {
+      return;
+    }
+    if (isProductOwnedByUser(this.product, user.id)) {
+      showToastByContext(this, { message: '这是你发布的商品，不能给自己下单', duration: 1600 });
+      backByContext(this);
+      return;
+    }
+    if (!canUserTradeProduct(this.product, user.id)) {
+      showToastByContext(this, { message: '当前商品暂不可下单', duration: 1500 });
+      backByContext(this);
+    }
   }
 
   private submit(): void {
@@ -35,6 +53,16 @@ struct CreateOrderPage {
     }
     if (!this.product) {
       showToastByContext(this, { message: '商品不存在', duration: 1500 });
+      return;
+    }
+    if (isProductOwnedByUser(this.product, user.id)) {
+      showToastByContext(this, { message: '这是你发布的商品，不能给自己下单', duration: 1600 });
+      backByContext(this);
+      return;
+    }
+    if (!canUserTradeProduct(this.product, user.id)) {
+      showToastByContext(this, { message: '当前商品暂不可下单', duration: 1500 });
+      backByContext(this);
       return;
     }
 

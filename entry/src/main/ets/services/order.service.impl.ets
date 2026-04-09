@@ -18,6 +18,14 @@ export class OrderServiceImpl implements OrderService {
     });
   }
 
+  private publishOrdersChanged(status: string): void {
+    syncService.publish({
+      key: 'orders:changed',
+      value: status,
+      updatedAt: Date.now()
+    });
+  }
+
   createOrder(buyerId: string, productId: string, address: string): OperationResult<Order> {
     if (address.trim().length === 0) {
       return { ok: false, message: '请填写收货地址或面交地点' };
@@ -52,6 +60,7 @@ export class OrderServiceImpl implements OrderService {
     orderRepository.save(order);
     const lockedProduct: Product | null = productRepository.updateStatus(product.id, 'locked');
     syncService.publish({ key: `order:${order.id}:status`, value: order.status, updatedAt: order.updatedAt });
+    this.publishOrdersChanged(order.status);
     if (lockedProduct) {
       syncService.publish({ key: `product:${lockedProduct.id}:status`, value: lockedProduct.status, updatedAt: lockedProduct.updatedAt });
       this.publishProductFeedChanged(lockedProduct.status);
@@ -77,6 +86,7 @@ export class OrderServiceImpl implements OrderService {
 
     orderRepository.save(order);
     syncService.publish({ key: `order:${order.id}:status`, value: order.status, updatedAt: order.updatedAt });
+    this.publishOrdersChanged(order.status);
     return { ok: true, message: '模拟支付成功', data: order };
   }
 
@@ -97,6 +107,7 @@ export class OrderServiceImpl implements OrderService {
     orderRepository.save(order);
     const restoredProduct: Product | null = productRepository.updateStatus(order.productId, 'on_sale');
     syncService.publish({ key: `order:${order.id}:status`, value: order.status, updatedAt: order.updatedAt });
+    this.publishOrdersChanged(order.status);
     if (restoredProduct) {
       syncService.publish({ key: `product:${restoredProduct.id}:status`, value: restoredProduct.status, updatedAt: restoredProduct.updatedAt });
       this.publishProductFeedChanged(restoredProduct.status);
@@ -131,6 +142,7 @@ export class OrderServiceImpl implements OrderService {
       updatedAt: order.updatedAt
     });
     syncService.publish({ key: `order:${order.id}:status`, value: order.status, updatedAt: order.updatedAt });
+    this.publishOrdersChanged(order.status);
 
     return { ok: true, message: '到达状态已更新', data: order };
   }
@@ -152,6 +164,7 @@ export class OrderServiceImpl implements OrderService {
     orderRepository.save(order);
     const soldProduct: Product | null = productRepository.updateStatus(order.productId, 'sold');
     syncService.publish({ key: `order:${order.id}:status`, value: order.status, updatedAt: order.updatedAt });
+    this.publishOrdersChanged(order.status);
     if (soldProduct) {
       syncService.publish({ key: `product:${soldProduct.id}:status`, value: soldProduct.status, updatedAt: soldProduct.updatedAt });
       this.publishProductFeedChanged(soldProduct.status);
@@ -194,6 +207,7 @@ export class OrderServiceImpl implements OrderService {
     order.reviewed = true;
     order.updatedAt = Date.now();
     orderRepository.save(order);
+    this.publishOrdersChanged(order.status);
 
     creditService.recalculateCredit(toUserId);
     return { ok: true, message: '评价成功', data: review };

@@ -2,6 +2,7 @@
 import { appContext } from '../../app/app-context';
 import { ChatThread, MessageNotification, NotificationType, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
+import { buildReminderRenderKey, buildThreadRenderKey } from '../../utils/render-keys';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -74,13 +75,6 @@ export struct MessageHubPage {
     this.refresh();
   }
 
-  aboutToDisappear(): void {
-    if (this.syncUnsubscriber) {
-      this.syncUnsubscriber();
-      this.syncUnsubscriber = null;
-    }
-  }
-
   private bindChanges(): void {
     if (this.syncUnsubscriber) {
       return;
@@ -128,6 +122,7 @@ export struct MessageHubPage {
 
     if (!item.isRead) {
       appContext.notification.markRead(item.id);
+      this.refresh();
     }
 
     if (item.type === 'product_submitted' || item.type === 'product_rejected') {
@@ -414,7 +409,7 @@ export struct MessageHubPage {
                 Column({ space: 12 }) {
                   ForEach(this.reminders, (item: MessageNotification) => {
                     this.buildReminderCard(item)
-                  }, (item: MessageNotification) => item.id)
+                  }, (item: MessageNotification) => buildReminderRenderKey(item))
                 }
                 .width('100%')
               }
@@ -430,7 +425,7 @@ export struct MessageHubPage {
                 Column({ space: 12 }) {
                   ForEach(this.threads, (thread: ChatThread) => {
                     this.buildThreadCard(thread)
-                  }, (thread: ChatThread) => thread.id)
+                  }, (thread: ChatThread) => buildThreadRenderKey(thread))
                 }
                 .width('100%')
               }

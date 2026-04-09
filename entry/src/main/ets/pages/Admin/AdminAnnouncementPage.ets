@@ -2,6 +2,7 @@
 import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { Announcement, User } from '../../types/domain';
+import { buildAnnouncementRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
@@ -194,7 +195,7 @@ struct AdminAnnouncementPage {
           } else {
             ForEach(this.list, (item: Announcement) => {
               this.buildAnnouncementCard(item);
-            }, (item: Announcement) => item.id)
+            }, (item: Announcement) => buildAnnouncementRenderKey(item))
           }
         }
         .width('100%')

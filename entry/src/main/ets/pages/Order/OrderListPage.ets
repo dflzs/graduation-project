@@ -5,6 +5,7 @@ import { ORDER_STATUS_TEXT } from '../../constants/config';
 import { orderRepository } from '../../repositories/order.repo';
 import { productRepository } from '../../repositories/product.repo';
 import { Order, OrderStatus, Product, User } from '../../types/domain';
+import { buildOrderRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
@@ -17,6 +18,7 @@ const SUB_TEXT_COLOR: string = '#7B756E';
 @Component
 struct OrderListPage {
   @State orders: Order[] = [];
+  private orderSyncUnsubscriber: (() => void) | null = null;
 
   onPageShow(): void {
     this.refresh();
@@ -24,6 +26,16 @@ struct OrderListPage {
 
   aboutToAppear(): void {
     this.refresh();
+    this.bindOrderChanges();
+  }
+
+  private bindOrderChanges(): void {
+    if (this.orderSyncUnsubscriber) {
+      return;
+    }
+    this.orderSyncUnsubscriber = appContext.sync.subscribe('orders:changed', () => {
+      this.refresh();
+    });
   }
 
   private refresh(): void {
@@ -315,7 +327,7 @@ struct OrderListPage {
         } else {
           ForEach(this.orders, (order: Order) => {
             this.buildOrderCard(order)
-          }, (item: Order) => item.id)
+          }, (item: Order) => buildOrderRenderKey(item))
         }
       }
       .width('100%')

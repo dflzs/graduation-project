@@ -75,6 +75,17 @@ struct ChatDetailPage {
     this.refresh();
   }
 
+  aboutToDisappear(): void {
+    if (this.threadId.length === 0) {
+      return;
+    }
+    appContext.sync.publish({
+      key: 'messages:changed',
+      value: this.threadId,
+      updatedAt: Date.now()
+    });
+  }
+
   private refresh(): void {
     const currentUser = this.getCurrentUser();
     if (!currentUser || this.threadId.length === 0) {
@@ -86,7 +97,7 @@ struct ChatDetailPage {
 
     appContext.chat.markThreadRead(this.threadId, currentUser.id);
     this.thread = appContext.chat.getThread(this.threadId, currentUser.id);
-    this.messages = appContext.chat.getMessages(this.threadId);
+    this.messages = this.thread ? appContext.chat.getMessages(this.threadId) : [];
     this.product = this.thread ? productRepository.getById(this.thread.productId) : null;
   }
 
