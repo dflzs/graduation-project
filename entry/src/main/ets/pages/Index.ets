@@ -6,9 +6,12 @@ import { CartContent } from '../components/CartContent';
 import { uploadRemoteClient } from '../services/upload-remote.client';
 import { normalizeManualCoverUrl } from '../utils/cover-image';
 import { resolveIndexRouteTab } from '../utils/detail-return-route';
+import { openPublishEntry } from '../utils/publish-entry';
+import { shouldShowMarketplaceUnreadBadge } from '../utils/marketplace-audience-ui';
 import { MessageHubPage } from './Chat/MessageHubPage';
 import { HomePage } from './Home/HomePage';
 import { User } from '../types/domain';
+import { getMarketplaceAudienceMode } from '../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -88,6 +91,10 @@ struct Index {
 
   private refreshMessageUnreadCount(): void {
     if (!this.currentUser) {
+      this.messageUnreadCount = 0;
+      return;
+    }
+    if (!shouldShowMarketplaceUnreadBadge(getMarketplaceAudienceMode(this.currentUser))) {
       this.messageUnreadCount = 0;
       return;
     }
@@ -688,7 +695,7 @@ struct Index {
             .shadow({ radius: 18, color: '#332F6BFF', offsetX: 0, offsetY: 8 })
             .justifyContent(FlexAlign.Center)
             .alignItems(HorizontalAlign.Center)
-            .onClick(() => pushUrlByContext(this, { url: 'pages/Product/PublishProductPage' }))
+            .onClick(() => openPublishEntry(this, this.currentUser))
 
             Text('\u53d1\u5e03')
               .fontSize(12)

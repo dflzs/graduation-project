@@ -7,6 +7,7 @@ import { creditService } from '../services/credit.service.impl';
 import { syncService } from '../services/sync.service.impl';
 import { notificationService } from '../services/notification.service.impl';
 import { chatService } from '../services/chat.service.impl';
+import { campusService } from '../services/campus.service.impl';
 import { canAccessAdmin } from '../services/guard.service';
 import { productRepository } from '../repositories/product.repo';
 import { userRepository } from '../repositories/user.repo';
@@ -32,6 +33,7 @@ export class AppContext {
   readonly sync = syncService;
   readonly notification = notificationService;
   readonly chat = chatService;
+  readonly campus = campusService;
 
   getSession(): AuthSession | null {
     return this.auth.restoreSession();

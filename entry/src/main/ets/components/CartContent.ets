@@ -11,7 +11,16 @@ import {
   getCartCardBackground,
   getCartCardBorder
 } from '../utils/cart-visuals';
-import { canUserTradeProduct, isProductOwnedByUser } from '../utils/trade-guard';
+import {
+  buildCartAudiencePresentation,
+  CartAudiencePresentation
+} from '../utils/marketplace-audience-ui';
+import {
+  canCurrentUserJoinTrade,
+  canUserTradeProduct,
+  getMarketplaceAudienceMode,
+  isProductOwnedByUser
+} from '../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -84,6 +93,12 @@ export struct CartContent {
       this.manageMode = false;
       return;
     }
+    if (!canCurrentUserJoinTrade(this.currentUser)) {
+      this.cartItems = [];
+      this.selectedItemIds = [];
+      this.manageMode = false;
+      return;
+    }
 
     this.cartItems = appContext.cart.listByUser(this.currentUser.id);
     this.selectedItemIds = syncSelectedCartItemIds(this.cartItems, previousSelectedIds);
@@ -105,13 +120,33 @@ export struct CartContent {
     }
   }
 
+  private audiencePresentation(): CartAudiencePresentation {
+    return buildCartAudiencePresentation(getMarketplaceAudienceMode(this.currentUser));
+  }
+
+  private openAudiencePrimaryAction(): void {
+    const presentation: CartAudiencePresentation = this.audiencePresentation();
+    if (presentation.primaryAction === 'login') {
+      this.goToLogin();
+      return;
+    }
+    if (presentation.primaryAction === 'home') {
+      this.goToHome();
+      return;
+    }
+    if (presentation.primaryAction === 'admin') {
+      pushUrlByContext(this, { url: 'pages/Admin/AdminDashboardPage' });
+    }
+  }
+
   private getProduct(item: CartItem): Product | null {
     return appContext.product.getProductById(item.productId);
   }
 
   private canSettleItem(item: CartItem): boolean {
     const userId: string = this.currentUser?.id ?? '';
-    return canUserTradeProduct(this.getProduct(item), userId);
+    const userRole = this.currentUser?.role;
+    return canUserTradeProduct(this.getProduct(item), userId, userRole);
   }
 
   private isSelfOwnedCartItem(item: CartItem): boolean {
@@ -313,6 +348,10 @@ export struct CartContent {
       this.goToLogin();
       return;
     }
+    if (!canCurrentUserJoinTrade(this.currentUser)) {
+      showToastByContext(this, { message: '管理员账号不支持购物车结算', duration: 1500 });
+      return;
+    }
 
     const checkoutState = resolveCartCheckoutState(this.selectedItemIds.length);
     if (checkoutState === 'none') {
@@ -378,9 +417,9 @@ export struct CartContent {
           .fontWeight(FontWeight.Bold)
           .fontColor(TITLE_COLOR)
 
-        Text(this.currentUser
+        Text(this.currentUser && canCurrentUserJoinTrade(this.currentUser)
           ? `已加入 ${this.cartItems.length} 件商品，勾选后可统一管理和结算`
-          : '登录后可同步你想买的商品，并集中管理待结算内容')
+          : this.audiencePresentation().headerDescription)
           .fontSize(13)
           .fontColor(SUB_TEXT_COLOR)
       }
@@ -413,17 +452,17 @@ export struct CartContent {
   private buildGuestBody(): void {
     Column({ space: 14 }) {
       EmptyState({
-        title: '登录后同步你的购物车',
-        description: '把想买的商品先加入购物车，再统一勾选、删除和去结算，流程会更顺。'
+        title: this.audiencePresentation().emptyTitle,
+        description: this.audiencePresentation().emptyDescription
       })
 
-      Button('去登录')
+      Button(this.audiencePresentation().emptyPrimaryActionLabel)
         .height(42)
         .type(ButtonType.Normal)
         .fontColor(PRIMARY_COLOR)
         .backgroundColor('#E8F0FF')
         .padding({ left: 16, right: 16 })
-        .onClick(() => this.goToLogin())
+        .onClick(() => this.openAudiencePrimaryAction())
     }
     .width('100%')
     .layoutWeight(1)
@@ -436,17 +475,17 @@ export struct CartContent {
   private buildEmptyBody(): void {
     Column({ space: 14 }) {
       EmptyState({
-        title: '购物车还是空的',
-        description: '把想买的商品先加入购物车，之后就能在这里统一勾选、管理和去结算。'
+        title: this.audiencePresentation().emptyTitle,
+        description: this.audiencePresentation().emptyDescription
       })
 
-      Button('去首页继续挑选')
+      Button(this.audiencePresentation().emptyPrimaryActionLabel)
         .height(42)
         .type(ButtonType.Normal)
         .fontColor(PRIMARY_COLOR)
         .backgroundColor('#E8F0FF')
         .padding({ left: 16, right: 16 })
-        .onClick(() => this.goToHome())
+        .onClick(() => this.openAudiencePrimaryAction())
     }
     .width('100%')
     .layoutWeight(1)
@@ -536,18 +575,18 @@ export struct CartContent {
   @Builder
   private buildGuestBottomBar(): void {
     Row({ space: 12 }) {
-      Text('登录后可同步购物车并继续结算')
+      Text(this.audiencePresentation().bottomHint)
         .layoutWeight(1)
         .fontSize(13)
         .lineHeight(20)
         .fontColor(SUB_TEXT_COLOR)
 
-      Button('去登录')
+      Button(this.audiencePresentation().emptyPrimaryActionLabel)
         .width(112)
         .height(44)
         .fontColor('#FFFFFF')
         .backgroundColor(PRIMARY_COLOR)
-        .onClick(() => this.goToLogin())
+        .onClick(() => this.openAudiencePrimaryAction())
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 12, bottom: this.shellMode ? 18 : 12 })
@@ -629,6 +668,8 @@ export struct CartContent {
 
       if (!this.currentUser) {
         this.buildGuestBody()
+      } else if (!canCurrentUserJoinTrade(this.currentUser)) {
+        this.buildEmptyBody()
       } else if (this.cartItems.length === 0) {
         this.buildEmptyBody()
       } else {
@@ -649,6 +690,8 @@ export struct CartContent {
       }
 
       if (!this.currentUser) {
+        this.buildGuestBottomBar()
+      } else if (!canCurrentUserJoinTrade(this.currentUser)) {
         this.buildGuestBottomBar()
       } else {
         this.buildSettlementBar()

@@ -165,12 +165,12 @@ struct RegisterVerifyPage {
             .fontSize(13)
             .fontColor('#9A9083')
 
-          Text('\u5148\u9a8c\u8bc1\u624b\u673a\u53f7\uff0c\u518d\u521b\u5efa\u6821\u56ed\u8d26\u53f7')
+          Text('\u5148\u9a8c\u8bc1\u624b\u673a\u53f7\uff0c\u518d\u5b8c\u5584\u6821\u56ed\u8d26\u53f7')
             .fontSize(33)
             .fontWeight(FontWeight.Bold)
             .fontColor('#2E2A26')
 
-          Text('\u53ea\u6709\u5b8c\u6210\u624b\u673a\u53f7\u9a8c\u8bc1\u540e\uff0c\u624d\u4f1a\u8fdb\u5165\u540e\u7eed\u7684\u6635\u79f0\u3001\u5bc6\u7801\u548c\u4e2a\u4eba\u8d44\u6599\u8bbe\u7f6e\u6d41\u7a0b\u3002')
+          Text('\u53ea\u6709\u5b8c\u6210\u624b\u673a\u53f7\u9a8c\u8bc1\u540e\uff0c\u624d\u4f1a\u8fdb\u5165\u540e\u7eed\u7684\u6635\u79f0\u3001\u5bc6\u7801\u4ee5\u53ca\u5b66\u6821\u3001\u6821\u533a\u3001\u5b66\u53f7\u7b49\u8d44\u6599\u8bbe\u7f6e\u6d41\u7a0b\u3002')
             .fontSize(16)
             .fontColor('#6D655D')
             .lineHeight(25)
@@ -236,7 +236,7 @@ struct RegisterVerifyPage {
         .border({ width: 1, color: '#E4D9CC' })
 
         Column({ space: 12 }) {
-          this.buildActionButton(this.isVerifying ? '\u9a8c\u8bc1\u4e2d...' : '\u4e0b\u4e00\u6b65', getPolishPrimaryButtonTone(), () => {
+          this.buildActionButton(this.isVerifying ? '\u9a8c\u8bc1\u4e2d...' : '\u4e0b\u4e00\u6b65\uff1a\u586b\u5199\u6821\u56ed\u8d44\u6599', getPolishPrimaryButtonTone(), () => {
             void this.nextStep();
           }, !this.isVerifying)
 

@@ -1,8 +1,9 @@
 ﻿import { cartRepository } from '../repositories/cart.repo';
 import { productRepository } from '../repositories/product.repo';
+import { userRepository } from '../repositories/user.repo';
 import { CartItem, OperationResult, Product } from '../types/domain';
 import { newId } from '../utils/id';
-import { isProductOwnedByUser } from '../utils/trade-guard';
+import { canCurrentUserJoinTrade, isProductOwnedByUser } from '../utils/trade-guard';
 import { syncService } from './sync.service.impl';
 
 export class CartServiceImpl {
@@ -12,6 +13,11 @@ export class CartServiceImpl {
   }
 
   addToCart(userId: string, productId: string, qty: number = 1): OperationResult<CartItem> {
+    const user = userRepository.getById(userId);
+    if (!canCurrentUserJoinTrade(user)) {
+      return { ok: false, message: '管理员账号不支持加入购物车' };
+    }
+
     const product: Product | null = productRepository.getById(productId);
     if (!product || product.isDeleted || product.status !== 'on_sale') {
       return { ok: false, message: '商品不可加入购物车' };

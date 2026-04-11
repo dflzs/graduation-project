@@ -9,6 +9,13 @@ const {
 } = require('./register-verification.store');
 
 const SHOW_DEBUG_CODE = process.env.NODE_ENV !== 'production';
+const USER_SELECT_FIELDS = `
+  id, phone, nickname, avatar, role, status, credit_score,
+  school_id, campus_id, student_no, grade_year, college_name, major_name,
+  verification_status, verification_method, verified_at, verification_rejected_reason,
+  verification_updated_at, completed_order_count, report_count, last_active_at,
+  created_at, updated_at
+`;
 
 function validatePhone(phone) {
   return /^1\d{10}$/.test(String(phone || '').trim());
@@ -109,7 +116,7 @@ async function register(req, res) {
     );
 
     const [rows] = await pool.query(
-      `SELECT id, phone, nickname, avatar, role, status, credit_score, created_at, updated_at
+      `SELECT ${USER_SELECT_FIELDS}
        FROM users WHERE id = ? LIMIT 1`,
       [result.insertId]
     );
@@ -139,7 +146,7 @@ async function loginByPassword(req, res) {
     }
 
     const [rows] = await pool.query(
-      `SELECT id, phone, password_hash, nickname, avatar, role, status, credit_score, created_at, updated_at
+      `SELECT ${USER_SELECT_FIELDS}, password_hash
        FROM users WHERE phone = ? LIMIT 1`,
       [phone]
     );
@@ -164,6 +171,12 @@ async function loginByPassword(req, res) {
       role: user.role
     });
 
+    await pool.query(
+      `UPDATE users SET last_active_at = NOW() WHERE id = ?`,
+      [user.id]
+    );
+
+    user.last_active_at = new Date();
     delete user.password_hash;
     return res.json(success({ token, user }, '登录成功'));
   } catch (error) {
@@ -175,7 +188,7 @@ async function me(req, res) {
   try {
     const userId = req.user.id;
     const [rows] = await pool.query(
-      `SELECT id, phone, nickname, avatar, role, status, credit_score, created_at, updated_at
+      `SELECT ${USER_SELECT_FIELDS}
        FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
@@ -226,7 +239,7 @@ async function updateMe(req, res) {
     );
 
     const [rows] = await pool.query(
-      `SELECT id, phone, nickname, avatar, role, status, credit_score, created_at, updated_at
+      `SELECT ${USER_SELECT_FIELDS}
        FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );

@@ -2,6 +2,11 @@ export type UserRole = 'user' | 'admin';
 export type UserStatus = 'active' | 'banned';
 export type ProductStatus = 'pending_review' | 'on_sale' | 'locked' | 'sold' | 'off_shelf' | 'rejected';
 export type PayType = 'simulated';
+export type VerificationMethod =
+  | 'MANUAL_STUDENT_CARD'
+  | 'MANUAL_CAMPUS_CARD'
+  | 'MANUAL_ENROLLMENT_PROOF'
+  | 'FUTURE_SSO';
 export type NotificationType =
   | 'product_submitted'
   | 'product_approved'
@@ -19,6 +24,88 @@ export enum OrderStatus {
   CANCELED = 'CANCELED'
 }
 
+export enum VerificationStatus {
+  UNVERIFIED = 'UNVERIFIED',
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  VERIFIED = 'VERIFIED',
+  REJECTED = 'REJECTED',
+  SUSPENDED = 'SUSPENDED'
+}
+
+export interface School {
+  id: string;
+  name: string;
+  shortName: string;
+  city?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Campus {
+  id: string;
+  schoolId: string;
+  name: string;
+  shortName: string;
+  isMainCampus: boolean;
+  isEnabled: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LocationGroup {
+  id: string;
+  schoolId: string;
+  campusId: string;
+  name: string;
+  description?: string;
+  isEnabled: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TradeLocation {
+  id: string;
+  schoolId: string;
+  campusId: string;
+  groupId: string;
+  name: string;
+  alias?: string;
+  description?: string;
+  safetyTips?: string;
+  recommendedCategories: string[];
+  isEnabled: boolean;
+  isHot: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StudentVerification {
+  id: string;
+  userId: string;
+  schoolId: string;
+  schoolName?: string;
+  campusId: string;
+  campusName?: string;
+  studentNo: string;
+  gradeYear?: number;
+  collegeName?: string;
+  majorName?: string;
+  verificationMethod: VerificationMethod;
+  materialUrls: string[];
+  status: VerificationStatus;
+  submittedAt: number;
+  reviewedAt?: number;
+  reviewedBy?: string;
+  reviewComment?: string;
+  rejectReason?: string;
+  updatedAt: number;
+}
+
 export interface User {
   id: string;
   phone: string;
@@ -30,6 +117,22 @@ export interface User {
   remoteUserId?: string;
   remoteSalt?: string;
   passwordConfigured?: boolean;
+  schoolId?: string;
+  schoolName?: string;
+  campusId?: string;
+  campusName?: string;
+  studentNo?: string;
+  gradeYear?: number;
+  collegeName?: string;
+  majorName?: string;
+  verificationStatus?: VerificationStatus;
+  verificationMethod?: VerificationMethod;
+  verifiedAt?: number;
+  verificationRejectedReason?: string;
+  verificationUpdatedAt?: number;
+  completedOrderCount?: number;
+  reportCount?: number;
+  lastActiveAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -43,6 +146,15 @@ export interface Product {
   category: string;
   images: string[];
   locationTag: string;
+  schoolId?: string;
+  schoolName?: string;
+  campusId?: string;
+  campusName?: string;
+  locationGroupId?: string;
+  locationGroupName?: string;
+  tradeLocationId?: string;
+  tradeLocationName?: string;
+  locationSafetyTips?: string;
   status: ProductStatus;
   isDeleted: boolean;
   createdAt: number;
@@ -66,6 +178,15 @@ export interface Order {
   amount: number;
   address: string;
   locationTag: string;
+  schoolId?: string;
+  schoolName?: string;
+  campusId?: string;
+  campusName?: string;
+  locationGroupId?: string;
+  locationGroupName?: string;
+  tradeLocationId?: string;
+  tradeLocationName?: string;
+  locationSafetyTips?: string;
   payType: PayType;
   status: OrderStatus;
   buyerArrived: boolean;

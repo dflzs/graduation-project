@@ -9,6 +9,7 @@ import { formatTime } from '../../utils/time';
 import { canUserAccessOrder } from '../../utils/trade-guard';
 import { backByContext, getParamsByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { buildOrderDetailReturnTarget } from '../../utils/detail-return-route';
+import { buildPublicCampusTrustPresentation, CampusTrustPresentation } from '../../utils/campus-trust-ui';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFCF8';
@@ -154,6 +155,14 @@ struct OrderDetailPage {
     }
     const userId: string = this.isBuyer() ? this.order.sellerId : this.order.buyerId;
     return userRepository.getById(userId)?.nickname ?? '校园用户';
+  }
+
+  private getCounterpartyTrustPresentation(): CampusTrustPresentation {
+    if (!this.order) {
+      return buildPublicCampusTrustPresentation(null);
+    }
+    const counterpartyId: string = this.isBuyer() ? this.order.sellerId : this.order.buyerId;
+    return buildPublicCampusTrustPresentation(userRepository.getById(counterpartyId));
   }
 
   private getExistingReview(): Review | null {
@@ -511,6 +520,55 @@ struct OrderDetailPage {
   }
 
   @Builder
+  private buildCounterpartyTrustCard(): void {
+    Column({ space: 12 }) {
+      Row({ space: 10 }) {
+        Column({ space: 4 }) {
+          Text('交易对象身份')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(FIELD_LABEL_COLOR)
+
+          Text(this.getCounterpartyTrustPresentation().headline)
+            .fontSize(13)
+            .fontColor(MUTED_COLOR)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        this.buildBadge(
+          this.getCounterpartyTrustPresentation().badgeText,
+          this.getCounterpartyTrustPresentation().badgeBackgroundColor,
+          this.getCounterpartyTrustPresentation().badgeTextColor
+        )
+      }
+      .width('100%')
+
+      Text(this.getCounterpartyName())
+        .width('100%')
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(TEXT_COLOR)
+
+      Text(this.getCounterpartyTrustPresentation().summary)
+        .width('100%')
+        .fontSize(14)
+        .fontColor('#4E4740')
+
+      Text(this.getCounterpartyTrustPresentation().helperText)
+        .width('100%')
+        .fontSize(13)
+        .lineHeight(20)
+        .fontColor(MUTED_COLOR)
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor(CARD_BACKGROUND)
+    .borderRadius(22)
+    .border({ width: 1, color: CARD_BORDER })
+  }
+
+  @Builder
   private buildReviewCard(order: Order): void {
     Column({ space: 12 }) {
       Text(order.reviewed ? '交易评价' : '补充评价')
@@ -629,6 +687,7 @@ struct OrderDetailPage {
         } else {
           this.buildStatusCard(this.order)
           this.buildProductCard(this.order)
+          this.buildCounterpartyTrustCard()
           this.buildOrderInfoCard(this.order)
           if (this.order.status === OrderStatus.COMPLETED) {
             this.buildReviewCard(this.order)

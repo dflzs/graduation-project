@@ -2,8 +2,10 @@
 import { appContext } from '../../app/app-context';
 import { CAMPUS_TRADE_QUICK_REPLIES } from '../../constants/message-quick-replies';
 import { productRepository } from '../../repositories/product.repo';
+import { userRepository } from '../../repositories/user.repo';
 import { ChatMessage, ChatThread, Product, ProductStatus, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
+import { buildPublicCampusTrustPresentation, CampusTrustPresentation } from '../../utils/campus-trust-ui';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -139,6 +141,11 @@ struct ChatDetailPage {
     return '￥' + (this.product?.price ?? 0).toFixed(2);
   }
 
+  private getPeerTrustPresentation(): CampusTrustPresentation {
+    const peerUser = this.thread ? userRepository.getById(this.thread.peerUserId) : null;
+    return buildPublicCampusTrustPresentation(peerUser);
+  }
+
   @Builder
   private buildEmptyState(): void {
     Column({ space: 12 }) {
@@ -203,6 +210,33 @@ struct ChatDetailPage {
             .fontSize(13)
             .fontColor(SUB_TEXT_COLOR)
         }
+
+        Row({ space: 8 }) {
+          Text('对方身份')
+            .fontSize(12)
+            .fontColor(SUB_TEXT_COLOR)
+
+          Text(this.getPeerTrustPresentation().badgeText)
+            .fontSize(11)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.getPeerTrustPresentation().badgeTextColor)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.getPeerTrustPresentation().badgeBackgroundColor)
+            .borderRadius(12)
+        }
+        .width('100%')
+
+        Text(this.getPeerTrustPresentation().summary)
+          .width('100%')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#4E4740')
+
+        Text(this.getPeerTrustPresentation().helperText)
+          .width('100%')
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor(SUB_TEXT_COLOR)
       }
       .width('100%')
       .padding(16)

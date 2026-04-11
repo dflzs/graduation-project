@@ -18,6 +18,7 @@ import {
 } from '../types/auth-remote';
 import { AuthService } from '../types/service-contracts';
 import { newId } from '../utils/id';
+import { resolveDisplayedVerificationStatus } from '../utils/campus-verification-lifecycle-ui';
 import { isValidPhone } from '../utils/validator';
 import { HttpRemoteAuthClient } from './auth-remote.client';
 import { AuthStateService, authStateService } from './auth-state.service';
@@ -214,7 +215,7 @@ export class AuthServiceImpl implements AuthService {
       const expiresAt = this.stateService.getExpiresAt();
       if (persistedUser && token.length > 0) {
         const latestUser = userRepository.getById(persistedUser.id) ?? userRepository.getByPhone(persistedUser.phone);
-        const sessionUser = latestUser ?? persistedUser;
+        const sessionUser = this.normalizeVerificationState(latestUser ?? persistedUser);
 
         if (!latestUser) {
           userRepository.save(sessionUser);
@@ -244,7 +245,8 @@ export class AuthServiceImpl implements AuthService {
       return null;
     }
 
-    this.session.currentUser = latestUser;
+    this.session.currentUser = this.normalizeVerificationState(latestUser);
+    userRepository.save(this.session.currentUser);
     this.stateService.saveSession(this.session);
     return this.session;
   }
@@ -360,7 +362,7 @@ export class AuthServiceImpl implements AuthService {
 
   private buildSession(user: User, token?: string): AuthSession {
     return {
-      currentUser: user,
+      currentUser: this.normalizeVerificationState(user),
       token: token || newId('token'),
       expiresAt: Date.now() + SESSION_TTL_MS
     };
@@ -376,7 +378,7 @@ export class AuthServiceImpl implements AuthService {
     const phone = remoteUser.phone || fallbackPhone;
 
     if (!existingUser) {
-      return {
+      const createdUser: User = {
         id: String(remoteUser.id),
         phone,
         nickname: remoteUser.nickname || `\u7528\u6237${phone.slice(-4)}`,
@@ -384,14 +386,31 @@ export class AuthServiceImpl implements AuthService {
         role: remoteUser.role === 'admin' ? 'admin' : 'user',
         status: remoteUser.status === 'banned' ? 'banned' : 'active',
         creditScore: remoteUser.credit_score,
+        schoolId: remoteUser.school_id,
+        schoolName: remoteUser.school_name,
+        campusId: remoteUser.campus_id,
+        campusName: remoteUser.campus_name,
+        studentNo: remoteUser.student_no,
+        gradeYear: remoteUser.grade_year,
+        collegeName: remoteUser.college_name,
+        majorName: remoteUser.major_name,
+        verificationStatus: remoteUser.verification_status,
+        verificationMethod: remoteUser.verification_method,
+        verifiedAt: remoteUser.verified_at,
+        verificationRejectedReason: remoteUser.verification_rejected_reason,
+        verificationUpdatedAt: remoteUser.verification_updated_at,
+        completedOrderCount: remoteUser.completed_order_count,
+        reportCount: remoteUser.report_count,
+        lastActiveAt: remoteUser.last_active_at,
         remoteUserId: String(remoteUser.id),
         passwordConfigured,
         createdAt: now,
         updatedAt: now
       };
+      return this.normalizeVerificationState(createdUser);
     }
 
-    return {
+    const mergedUser: User = {
       id: String(remoteUser.id || existingUser.id),
       phone,
       nickname: remoteUser.nickname || existingUser.nickname || `\u7528\u6237${phone.slice(-4)}`,
@@ -399,11 +418,62 @@ export class AuthServiceImpl implements AuthService {
       role: remoteUser.role === 'admin' ? 'admin' : existingUser.role,
       status: remoteUser.status === 'banned' ? 'banned' : 'active',
       creditScore: remoteUser.credit_score || existingUser.creditScore,
+      schoolId: remoteUser.school_id ?? existingUser.schoolId,
+      schoolName: remoteUser.school_name ?? existingUser.schoolName,
+      campusId: remoteUser.campus_id ?? existingUser.campusId,
+      campusName: remoteUser.campus_name ?? existingUser.campusName,
+      studentNo: remoteUser.student_no ?? existingUser.studentNo,
+      gradeYear: remoteUser.grade_year ?? existingUser.gradeYear,
+      collegeName: remoteUser.college_name ?? existingUser.collegeName,
+      majorName: remoteUser.major_name ?? existingUser.majorName,
+      verificationStatus: remoteUser.verification_status ?? existingUser.verificationStatus,
+      verificationMethod: remoteUser.verification_method ?? existingUser.verificationMethod,
+      verifiedAt: remoteUser.verified_at ?? existingUser.verifiedAt,
+      verificationRejectedReason: remoteUser.verification_rejected_reason ?? existingUser.verificationRejectedReason,
+      verificationUpdatedAt: remoteUser.verification_updated_at ?? existingUser.verificationUpdatedAt,
+      completedOrderCount: remoteUser.completed_order_count ?? existingUser.completedOrderCount,
+      reportCount: remoteUser.report_count ?? existingUser.reportCount,
+      lastActiveAt: remoteUser.last_active_at ?? existingUser.lastActiveAt,
       remoteUserId: String(remoteUser.id),
       passwordConfigured: passwordConfigured || existingUser.passwordConfigured || false,
       createdAt: existingUser.createdAt,
       updatedAt: now
     };
+    return this.normalizeVerificationState(mergedUser);
+  }
+
+  private normalizeVerificationState(user: User): User {
+    const normalizedUser: User = {
+      id: user.id,
+      phone: user.phone,
+      nickname: user.nickname,
+      avatar: user.avatar,
+      role: user.role,
+      status: user.status,
+      creditScore: user.creditScore,
+      remoteUserId: user.remoteUserId,
+      remoteSalt: user.remoteSalt,
+      passwordConfigured: user.passwordConfigured,
+      schoolId: user.schoolId,
+      schoolName: user.schoolName,
+      campusId: user.campusId,
+      campusName: user.campusName,
+      studentNo: user.studentNo,
+      gradeYear: user.gradeYear,
+      collegeName: user.collegeName,
+      majorName: user.majorName,
+      verificationStatus: resolveDisplayedVerificationStatus(user),
+      verificationMethod: user.verificationMethod,
+      verifiedAt: user.verifiedAt,
+      verificationRejectedReason: user.verificationRejectedReason,
+      verificationUpdatedAt: user.verificationUpdatedAt,
+      completedOrderCount: user.completedOrderCount,
+      reportCount: user.reportCount,
+      lastActiveAt: user.lastActiveAt,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
+    return normalizedUser;
   }
 
   private isValidCode(code: string): boolean {

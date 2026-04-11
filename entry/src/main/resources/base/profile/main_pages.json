@@ -23,6 +23,7 @@
     "pages/Admin/AdminDashboardPage",
     "pages/Admin/AdminUsersPage",
     "pages/Admin/AdminProductsPage",
+    "pages/Admin/AdminVerificationPage",
     "pages/Admin/AdminAnnouncementPage"
   ]
 }

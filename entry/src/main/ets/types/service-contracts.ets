@@ -1,7 +1,9 @@
 import {
   AuthSession,
+  Campus,
   ChatMessage,
   ChatThread,
+  LocationGroup,
   MessageNotification,
   NotificationType,
   OperationResult,
@@ -9,9 +11,13 @@ import {
   Product,
   RegisterCodeVerification,
   Review,
+  School,
+  StudentVerification,
   SyncPayload,
+  TradeLocation,
   User,
-  VerificationCodeDispatch
+  VerificationCodeDispatch,
+  VerificationStatus
 } from './domain';
 
 export interface AuthService {
@@ -91,4 +97,43 @@ export interface ChatService {
   openProductThread(productId: string, buyerId: string, sellerId: string): OperationResult<string>;
   sendMessage(threadId: string, fromUserId: string, content: string): OperationResult<ChatMessage>;
   markThreadRead(threadId: string, viewerId: string): void;
+}
+
+export interface CampusLocationQuery {
+  schoolId?: string;
+  campusId?: string;
+  groupId?: string;
+  category?: string;
+  enabledOnly?: boolean;
+}
+
+export interface CampusService {
+  listSchools(): Promise<OperationResult<School[]>>;
+  listCampuses(schoolId: string): Promise<OperationResult<Campus[]>>;
+  listLocationGroups(schoolId: string, campusId: string): Promise<OperationResult<LocationGroup[]>>;
+  listTradeLocations(query?: CampusLocationQuery): Promise<OperationResult<TradeLocation[]>>;
+  getCurrentCampusProfile(): Promise<OperationResult<User | null>>;
+  updateCampusProfile(
+    schoolId: string,
+    campusId: string,
+    campusName: string,
+    studentNo: string,
+    gradeYear?: number,
+    collegeName?: string,
+    majorName?: string
+  ): Promise<OperationResult<User>>;
+  getCurrentVerification(): Promise<OperationResult<StudentVerification | null>>;
+  submitVerification(input: StudentVerification): Promise<OperationResult<StudentVerification>>;
+  listVerificationApplications(status?: VerificationStatus): Promise<OperationResult<StudentVerification[]>>;
+  reviewVerification(
+    verificationId: string,
+    status: VerificationStatus,
+    reviewComment: string,
+    rejectReason: string
+  ): Promise<OperationResult<StudentVerification>>;
+  upsertSchool(school: School): Promise<OperationResult<School>>;
+  upsertCampus(campus: Campus): Promise<OperationResult<Campus>>;
+  upsertLocationGroup(group: LocationGroup): Promise<OperationResult<LocationGroup>>;
+  upsertTradeLocation(location: TradeLocation): Promise<OperationResult<TradeLocation>>;
+  updateTradeLocationStatus(locationId: string, isEnabled: boolean): Promise<OperationResult<TradeLocation>>;
 }

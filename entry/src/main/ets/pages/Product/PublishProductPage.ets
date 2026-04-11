@@ -1,13 +1,19 @@
 import { fileIo } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { appContext } from '../../app/app-context';
-import { CAMPUS_LOCATIONS, PRODUCT_CATEGORIES } from '../../constants/config';
+import { PRODUCT_CATEGORIES } from '../../constants/config';
 import { productRepository } from '../../repositories/product.repo';
 import { notificationService } from '../../services/notification.service.impl';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { uploadRemoteClient } from '../../services/upload-remote.client';
-import { User } from '../../types/domain';
+import { LocationGroup, TradeLocation, User } from '../../types/domain';
 import { RemoteCreateProductPayload } from '../../types/product-remote';
+import {
+  buildTradeLocationHint,
+  buildTradeLocationLabel,
+  filterTradeLocationsForCategory,
+  pickPreferredTradeLocation
+} from '../../utils/campus-location-ui';
 import { normalizeManualCoverUrl } from '../../utils/cover-image';
 import { getPublishChipBackground, getPublishChipBorder, getPublishChipText } from '../../utils/publish-chip';
 import { pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
@@ -28,11 +34,144 @@ struct PublishProductPage {
   @State desc: string = '';
   @State priceText: string = '';
   @State category: string = PRODUCT_CATEGORIES[0];
-  @State locationTag: string = CAMPUS_LOCATIONS[0];
+  @State locationTag: string = '';
   @State coverLocalPath: string = '';
   @State coverPreviewUri: string = '';
   @State manualCoverUrl: string = '';
   @State isSubmitting: boolean = false;
+  @State locationGroups: LocationGroup[] = [];
+  @State tradeLocations: TradeLocation[] = [];
+  @State schoolId: string = '';
+  @State schoolName: string = '';
+  @State campusId: string = '';
+  @State campusName: string = '';
+  @State selectedLocationGroupId: string = '';
+  @State selectedTradeLocationId: string = '';
+  @State locationHint: string = '\u8bf7\u5148\u5b8c\u5584\u6821\u56ed\u8d44\u6599\uff0c\u518d\u9009\u62e9\u53ef\u7528\u7684\u6821\u5185\u4ea4\u6613\u70b9\u3002';
+  @State isCampusLocationLoading: boolean = false;
+
+  aboutToAppear(): void {
+    void this.refreshCampusLocations();
+  }
+
+  onPageShow(): void {
+    void this.refreshCampusLocations();
+  }
+
+  private getSelectedLocationGroupName(): string {
+    const group = this.locationGroups.find((item: LocationGroup) => item.id === this.selectedLocationGroupId);
+    return group?.name ?? '';
+  }
+
+  private getVisibleTradeLocations(): TradeLocation[] {
+    return filterTradeLocationsForCategory(this.tradeLocations, this.category, this.selectedLocationGroupId);
+  }
+
+  private getSelectedTradeLocation(): TradeLocation | null {
+    const current = this.tradeLocations.find((item: TradeLocation) => item.id === this.selectedTradeLocationId);
+    return current ?? null;
+  }
+
+  private hasCampusProfile(): boolean {
+    return this.schoolId.length > 0 && this.campusId.length > 0;
+  }
+
+  private hasAvailableCampusLocations(): boolean {
+    return this.getVisibleTradeLocations().length > 0;
+  }
+
+  private async refreshCampusLocations(): Promise<void> {
+    const currentUser = appContext.getCurrentUser();
+    this.schoolId = currentUser?.schoolId ?? '';
+    this.schoolName = currentUser?.schoolName ?? '';
+    this.campusId = currentUser?.campusId ?? '';
+    this.campusName = currentUser?.campusName ?? '';
+
+    if (!this.hasCampusProfile()) {
+      this.locationGroups = [];
+      this.tradeLocations = [];
+      this.selectedLocationGroupId = '';
+      this.selectedTradeLocationId = '';
+      this.locationTag = '';
+      this.locationHint = '\u8bf7\u5148\u5728\u4e2a\u4eba\u8d44\u6599\u9875\u5b8c\u6210\u5b66\u6821\u548c\u6821\u533a\u4fe1\u606f\uff0c\u53d1\u5e03\u5546\u54c1\u540e\u624d\u80fd\u9009\u62e9\u6821\u56ed\u4ea4\u6613\u70b9\u3002';
+      return;
+    }
+
+    this.isCampusLocationLoading = true;
+
+    try {
+      const groupsResult = await appContext.campus.listLocationGroups(this.schoolId, this.campusId);
+      const locationsResult = await appContext.campus.listTradeLocations({
+        schoolId: this.schoolId,
+        campusId: this.campusId,
+        enabledOnly: true
+      });
+
+      this.locationGroups = (groupsResult.data ?? []).filter((item: LocationGroup) => item.isEnabled);
+      this.tradeLocations = (locationsResult.data ?? []).filter((item: TradeLocation) => item.isEnabled);
+
+      if (this.tradeLocations.length === 0) {
+        this.selectedLocationGroupId = '';
+        this.selectedTradeLocationId = '';
+        this.locationTag = '';
+        this.locationHint = '\u5f53\u524d\u6821\u533a\u6682\u65e0\u53ef\u7528\u4ea4\u6613\u70b9\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u5148\u914d\u7f6e\u6821\u56ed\u5730\u70b9\u3002';
+        return;
+      }
+
+      const currentGroupValid = this.locationGroups.some((item: LocationGroup) => item.id === this.selectedLocationGroupId);
+      if (!currentGroupValid) {
+        const preferredLocation = pickPreferredTradeLocation(this.tradeLocations, this.category);
+        this.selectedLocationGroupId = preferredLocation?.groupId
+          ?? this.locationGroups[0]?.id
+          ?? this.tradeLocations[0].groupId;
+      }
+
+      this.syncSelectedTradeLocation();
+    } finally {
+      this.isCampusLocationLoading = false;
+    }
+  }
+
+  private syncSelectedTradeLocation(): void {
+    const visibleLocations = this.getVisibleTradeLocations();
+    if (visibleLocations.length === 0) {
+      this.selectedTradeLocationId = '';
+      this.locationTag = '';
+      this.locationHint = '\u5f53\u524d\u5206\u7ec4\u4e0b\u6682\u65e0\u9002\u5408\u6b64\u5546\u54c1\u7684\u4ea4\u6613\u70b9\uff0c\u53ef\u5c1d\u8bd5\u5207\u6362\u5206\u7ec4\u6216\u7c7b\u522b\u3002';
+      return;
+    }
+
+    const current = visibleLocations.find((item: TradeLocation) => item.id === this.selectedTradeLocationId)
+      ?? pickPreferredTradeLocation(visibleLocations, this.category);
+    if (!current) {
+      this.selectedTradeLocationId = '';
+      this.locationTag = '';
+      this.locationHint = '\u6682\u65e0\u53ef\u7528\u4ea4\u6613\u70b9';
+      return;
+    }
+
+    this.selectedTradeLocationId = current.id;
+    this.selectedLocationGroupId = current.groupId;
+    this.locationTag = buildTradeLocationLabel(current, this.getSelectedLocationGroupName());
+    this.locationHint = buildTradeLocationHint(current);
+  }
+
+  private openCampusProfile(): void {
+    pushUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
+  }
+
+  private updateLocationGroup(groupId: string): void {
+    this.selectedLocationGroupId = groupId;
+    this.selectedTradeLocationId = '';
+    this.syncSelectedTradeLocation();
+  }
+
+  private updateTradeLocation(location: TradeLocation): void {
+    this.selectedLocationGroupId = location.groupId;
+    this.selectedTradeLocationId = location.id;
+    this.locationTag = buildTradeLocationLabel(location, this.getSelectedLocationGroupName());
+    this.locationHint = buildTradeLocationHint(location);
+  }
 
   private async submit(): Promise<void> {
     if (this.isSubmitting) {
@@ -50,9 +189,20 @@ struct PublishProductPage {
     const trimmedTitle = this.title.trim();
     const trimmedDesc = this.desc.trim();
     const price = Number.parseFloat(this.priceText);
+    const selectedLocation = this.getSelectedTradeLocation();
 
     if (trimmedTitle.length === 0 || trimmedDesc.length === 0 || Number.isNaN(price) || price <= 0) {
       showToastByContext(this, { message: '请完整填写商品信息', duration: 1500 });
+      return;
+    }
+
+    if (!this.hasCampusProfile()) {
+      showToastByContext(this, { message: '\u8bf7\u5148\u5b8c\u6210\u5b66\u6821\u548c\u6821\u533a\u8d44\u6599', duration: 1600 });
+      this.openCampusProfile();
+      return;
+    }
+    if (!selectedLocation || this.locationTag.length === 0) {
+      showToastByContext(this, { message: '\u8bf7\u5148\u9009\u62e9\u4e00\u4e2a\u53ef\u7528\u7684\u6821\u56ed\u4ea4\u6613\u70b9', duration: 1600 });
       return;
     }
 
@@ -82,7 +232,11 @@ struct PublishProductPage {
           price,
           this.category,
           this.locationTag,
-          coverImageUrl
+          coverImageUrl,
+          this.schoolId,
+          this.campusId,
+          selectedLocation.groupId,
+          selectedLocation.id
         )
       );
 
@@ -269,6 +423,111 @@ struct PublishProductPage {
     .border({ width: 1, color: CARD_BORDER })
   }
 
+  @Builder
+  private buildCampusLocationSection(): void {
+    Column({ space: 12 }) {
+      this.buildSectionTitle('\u6821\u56ed\u4ea4\u6613\u5730\u70b9')
+
+      if (!this.hasCampusProfile()) {
+        Column({ space: 8 }) {
+          Text('\u53d1\u5e03\u524d\u9700\u5148\u5b8c\u6210\u5b66\u6821\u3001\u6821\u533a\u8d44\u6599\uff0c\u5e73\u53f0\u624d\u80fd\u4e3a\u4f60\u5206\u914d\u6b63\u5f0f\u7684\u6821\u5185\u4ea4\u6613\u70b9\u3002')
+            .width('100%')
+            .fontSize(13)
+            .fontColor(SUB_TEXT_COLOR)
+            .lineHeight(20)
+
+          Button('\u53bb\u5b8c\u5584\u6821\u56ed\u8d44\u6599')
+            .height(40)
+            .backgroundColor('#2563EB')
+            .fontColor('#FFFFFF')
+            .borderRadius(14)
+            .padding({ left: 18, right: 18 })
+            .onClick(() => this.openCampusProfile())
+        }
+        .width('100%')
+      } else if (this.isCampusLocationLoading) {
+        Text('\u6b63\u5728\u52a0\u8f7d\u5f53\u524d\u6821\u533a\u7684\u4ea4\u6613\u70b9...')
+          .width('100%')
+          .fontSize(13)
+          .fontColor(SUB_TEXT_COLOR)
+      } else if (!this.hasAvailableCampusLocations()) {
+        Text(this.locationHint)
+          .width('100%')
+          .fontSize(13)
+          .fontColor(SUB_TEXT_COLOR)
+          .lineHeight(20)
+      } else {
+        Text(`${this.schoolName} / ${this.campusName}`)
+          .width('100%')
+          .fontSize(13)
+          .fontColor(SUB_TEXT_COLOR)
+
+        if (this.locationGroups.length > 0) {
+          Column({ space: 8 }) {
+            Text('\u5730\u70b9\u5206\u7ec4')
+              .width('100%')
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#4A433B')
+
+            Flex({ wrap: FlexWrap.Wrap }) {
+              ForEach(this.locationGroups, (group: LocationGroup) => {
+                Button(group.name)
+                  .type(ButtonType.Normal)
+                  .height(34)
+                  .padding({ left: 12, right: 12 })
+                  .backgroundColor(getPublishChipBackground(this.selectedLocationGroupId === group.id))
+                  .fontColor(getPublishChipText(this.selectedLocationGroupId === group.id))
+                  .fontSize(13)
+                  .fontWeight(this.selectedLocationGroupId === group.id ? FontWeight.Medium : FontWeight.Normal)
+                  .borderRadius(12)
+                  .border({ width: 1, color: getPublishChipBorder(this.selectedLocationGroupId === group.id) })
+                  .margin({ right: 8, bottom: 8 })
+                  .onClick(() => this.updateLocationGroup(group.id))
+              }, (group: LocationGroup) => group.id)
+            }
+            .width('100%')
+          }
+          .width('100%')
+        }
+
+        Column({ space: 8 }) {
+          Text('\u5177\u4f53\u4ea4\u6613\u70b9')
+            .width('100%')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#4A433B')
+
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(this.getVisibleTradeLocations(), (location: TradeLocation) => {
+              Button(buildTradeLocationLabel(location, this.getSelectedLocationGroupName()))
+                .type(ButtonType.Normal)
+                .height(34)
+                .padding({ left: 12, right: 12 })
+                .backgroundColor(getPublishChipBackground(this.selectedTradeLocationId === location.id))
+                .fontColor(getPublishChipText(this.selectedTradeLocationId === location.id))
+                .fontSize(13)
+                .fontWeight(this.selectedTradeLocationId === location.id ? FontWeight.Medium : FontWeight.Normal)
+                .borderRadius(12)
+                .border({ width: 1, color: getPublishChipBorder(this.selectedTradeLocationId === location.id) })
+                .margin({ right: 8, bottom: 8 })
+                .onClick(() => this.updateTradeLocation(location))
+            }, (location: TradeLocation) => location.id)
+          }
+          .width('100%')
+        }
+        .width('100%')
+
+        Text(this.locationHint)
+          .width('100%')
+          .fontSize(12)
+          .fontColor('#8C867F')
+          .lineHeight(18)
+      }
+    }
+    .width('100%')
+  }
+
   build() {
     Scroll() {
       Column({ space: 16 }) {
@@ -367,29 +626,15 @@ struct PublishProductPage {
                 .borderRadius(12)
                 .border({ width: 1, color: getPublishChipBorder(this.category === item) })
                 .margin({ right: 8, bottom: 8 })
-                .onClick(() => this.category = item)
+                .onClick(() => {
+                  this.category = item;
+                  this.syncSelectedTradeLocation();
+                })
             }, (item: string) => item)
           }
           .width('100%')
 
-          this.buildSectionTitle('面交地点')
-          Flex({ wrap: FlexWrap.Wrap }) {
-            ForEach(CAMPUS_LOCATIONS, (item: string) => {
-              Button(item)
-                .type(ButtonType.Normal)
-                .height(34)
-                .padding({ left: 12, right: 12 })
-                .backgroundColor(getPublishChipBackground(this.locationTag === item))
-                .fontColor(getPublishChipText(this.locationTag === item))
-                .fontSize(13)
-                .fontWeight(this.locationTag === item ? FontWeight.Medium : FontWeight.Normal)
-                .borderRadius(12)
-                .border({ width: 1, color: getPublishChipBorder(this.locationTag === item) })
-                .margin({ right: 8, bottom: 8 })
-                .onClick(() => this.locationTag = item)
-            }, (item: string) => item)
-          }
-          .width('100%')
+          this.buildCampusLocationSection()
         }
         .width('100%')
 

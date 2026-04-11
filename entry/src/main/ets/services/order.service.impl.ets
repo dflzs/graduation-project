@@ -1,6 +1,7 @@
 ﻿import { orderRepository } from '../repositories/order.repo';
 import { productRepository } from '../repositories/product.repo';
 import { reviewRepository } from '../repositories/review.repo';
+import { userRepository } from '../repositories/user.repo';
 import { OrderService } from '../types/service-contracts';
 import { OperationResult, Order, OrderStatus, Product, Review } from '../types/domain';
 import { moveOrderStatus, canEnterReadyHandover } from './order-state-machine';
@@ -8,6 +9,7 @@ import { newId } from '../utils/id';
 import { creditService } from './credit.service.impl';
 import { syncService } from './sync.service.impl';
 import { notificationService } from './notification.service.impl';
+import { canCurrentUserJoinTrade } from '../utils/trade-guard';
 
 export class OrderServiceImpl implements OrderService {
   private publishProductFeedChanged(status: string): void {
@@ -31,6 +33,11 @@ export class OrderServiceImpl implements OrderService {
       return { ok: false, message: '请填写收货地址或面交地点' };
     }
 
+    const buyer = userRepository.getById(buyerId);
+    if (buyer && !canCurrentUserJoinTrade(buyer)) {
+      return { ok: false, message: '管理员账号不支持下单' };
+    }
+
     const product: Product | null = productRepository.getById(productId);
     if (!product || product.isDeleted || product.status !== 'on_sale') {
       return { ok: false, message: '商品不可购买' };
@@ -48,6 +55,15 @@ export class OrderServiceImpl implements OrderService {
       amount: product.price,
       address,
       locationTag: product.locationTag,
+      schoolId: product.schoolId,
+      schoolName: product.schoolName,
+      campusId: product.campusId,
+      campusName: product.campusName,
+      locationGroupId: product.locationGroupId,
+      locationGroupName: product.locationGroupName,
+      tradeLocationId: product.tradeLocationId,
+      tradeLocationName: product.tradeLocationName,
+      locationSafetyTips: product.locationSafetyTips,
       payType: 'simulated',
       status: OrderStatus.PENDING_PAYMENT,
       buyerArrived: false,

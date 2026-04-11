@@ -1,11 +1,13 @@
 import { backByContext, getParamsByContext, pushUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
 import { productRepository } from '../../repositories/product.repo';
+import { userRepository } from '../../repositories/user.repo';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { Product, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
-import { canUserTradeProduct, isProductOwnedByUser } from '../../utils/trade-guard';
+import { canCurrentUserJoinTrade, canUserTradeProduct, isProductOwnedByUser } from '../../utils/trade-guard';
 import { canRequestRemoteProductDetail } from '../../utils/product-detail-source';
+import { buildPublicCampusTrustPresentation, CampusTrustPresentation } from '../../utils/campus-trust-ui';
 
 const PRODUCT_PARAM_INVALID_TEXT: string = '\u5546\u54c1\u53c2\u6570\u65e0\u6548';
 const PRODUCT_LOAD_FAILED_TEXT: string = '\u5546\u54c1\u4e0d\u5b58\u5728\u6216\u52a0\u8f7d\u5931\u8d25';
@@ -230,6 +232,10 @@ struct ProductDetailPage {
       pushUrlByContext(this, { url: 'pages/Auth/LoginPage' });
       return;
     }
+    if (!canCurrentUserJoinTrade(user)) {
+      showToastByContext(this, { message: '管理员账号不支持加入购物车', duration: 1500 });
+      return;
+    }
 
     if (!this.product) {
       return;
@@ -243,7 +249,7 @@ struct ProductDetailPage {
       return;
     }
 
-    if (!canUserTradeProduct(this.product, user.id)) {
+    if (!canUserTradeProduct(this.product, user.id, user.role)) {
       showToastByContext(this, {
         message: '\u5f53\u524d\u5546\u54c1\u4e0d\u53ef\u52a0\u5165\u8d2d\u7269\u8f66',
         duration: 1500
@@ -262,6 +268,10 @@ struct ProductDetailPage {
       pushUrlByContext(this, { url: 'pages/Auth/LoginPage' });
       return;
     }
+    if (!canCurrentUserJoinTrade(currentUser)) {
+      showToastByContext(this, { message: '管理员账号不支持下单', duration: 1500 });
+      return;
+    }
     if (!this.product) {
       return;
     }
@@ -272,7 +282,7 @@ struct ProductDetailPage {
       });
       return;
     }
-    if (!canUserTradeProduct(this.product, currentUser.id)) {
+    if (!canUserTradeProduct(this.product, currentUser.id, currentUser.role)) {
       showToastByContext(this, {
         message: '\u5f53\u524d\u5546\u54c1\u4e0d\u53ef\u4e0b\u5355',
         duration: 1500
@@ -291,7 +301,8 @@ struct ProductDetailPage {
   }
 
   private canCurrentUserTrade(product: Product): boolean {
-    return canUserTradeProduct(product, appContext.getCurrentUser()?.id ?? '');
+    const currentUser = appContext.getCurrentUser();
+    return canUserTradeProduct(product, currentUser?.id ?? '', currentUser?.role);
   }
 
   private contactSeller(): void {
@@ -299,6 +310,10 @@ struct ProductDetailPage {
     if (!currentUser) {
       showToastByContext(this, { message: '\u8bf7\u5148\u767b\u5f55', duration: 1500 });
       pushUrlByContext(this, { url: 'pages/Auth/LoginPage' });
+      return;
+    }
+    if (!canCurrentUserJoinTrade(currentUser)) {
+      showToastByContext(this, { message: '管理员账号不支持发起商品沟通', duration: 1500 });
       return;
     }
 
@@ -321,6 +336,11 @@ struct ProductDetailPage {
       url: 'pages/Chat/ChatDetailPage',
       params: { threadId: threadResult.data }
     });
+  }
+
+  private getSellerTrustPresentation(): CampusTrustPresentation {
+    const seller = this.product ? userRepository.getById(this.product.sellerId) : null;
+    return buildPublicCampusTrustPresentation(seller);
   }
 
   @Builder
@@ -347,6 +367,51 @@ struct ProductDetailPage {
         .fontWeight(FontWeight.Medium)
     }
     .width('100%')
+  }
+
+  @Builder
+  private buildSellerTrustCard(): void {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        Column({ space: 4 }) {
+          Text('卖家身份')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(TITLE_COLOR)
+
+          Text(this.getSellerTrustPresentation().headline)
+            .fontSize(13)
+            .fontColor(SUB_TEXT_COLOR)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Text(this.getSellerTrustPresentation().badgeText)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.getSellerTrustPresentation().badgeTextColor)
+          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .backgroundColor(this.getSellerTrustPresentation().badgeBackgroundColor)
+          .borderRadius(14)
+      }
+      .width('100%')
+
+      Text(this.getSellerTrustPresentation().summary)
+        .width('100%')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(TITLE_COLOR)
+
+      Text(this.getSellerTrustPresentation().helperText)
+        .width('100%')
+        .fontSize(13)
+        .lineHeight(20)
+        .fontColor(SUB_TEXT_COLOR)
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor(CARD_BACKGROUND)
+    .borderRadius(22)
   }
 
   @Builder
@@ -585,6 +650,8 @@ struct ProductDetailPage {
         .padding(18)
         .backgroundColor(CARD_BACKGROUND)
         .borderRadius(22)
+
+        this.buildSellerTrustCard()
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 16, bottom: 132 })

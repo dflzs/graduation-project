@@ -42,7 +42,7 @@ function normalizeStatus(value: string): ProductStatus {
   return 'on_sale';
 }
 
-function mapRemoteProduct(item: RemoteProductItem): Product {
+export function mapRemoteProductItem(item: RemoteProductItem): Product {
   return {
     id: String(item.id),
     sellerId: String(item.seller_id),
@@ -52,6 +52,15 @@ function mapRemoteProduct(item: RemoteProductItem): Product {
     category: item.category,
     images: item.cover_image ? [item.cover_image] : [],
     locationTag: item.location_tag,
+    schoolId: item.school_id,
+    schoolName: item.school_name,
+    campusId: item.campus_id,
+    campusName: item.campus_name,
+    locationGroupId: item.location_group_id,
+    locationGroupName: item.location_group_name,
+    tradeLocationId: item.trade_location_id,
+    tradeLocationName: item.trade_location_name,
+    locationSafetyTips: item.location_safety_tips,
     status: normalizeStatus(item.status),
     isDeleted: false,
     createdAt: parseTimestamp(item.created_at),
@@ -183,7 +192,7 @@ export class RemoteProductClient {
     return {
       ok: true,
       message: result.data?.message || successMessage,
-      data: items.map(mapRemoteProduct)
+      data: items.map(mapRemoteProductItem)
     };
   }
 
@@ -207,7 +216,7 @@ export class RemoteProductClient {
     return {
       ok: true,
       message: result.data?.message || successMessage,
-      data: mapRemoteProduct(item)
+      data: mapRemoteProductItem(item)
     };
   }
 

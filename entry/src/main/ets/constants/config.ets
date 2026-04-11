@@ -2,6 +2,7 @@
 
 export const ADMIN_LOGIN_CODE: string = 'ADMIN2026';
 export const AUTH_API_BASE_URL: string = 'http://49.232.30.147';
+export const CAMPUS_API_BASE_URL: string = AUTH_API_BASE_URL;
 export const AUTH_HTTP_TIMEOUT_MS: number = 15000;
 
 export const DEFAULT_AVATAR: string = '';
@@ -22,6 +23,7 @@ export const PRODUCT_CATEGORIES: string[] = [
   '其他'
 ];
 
+// Legacy fallback only. New publish/order flows should migrate to campus-configured trade locations.
 export const CAMPUS_LOCATIONS: string[] = [
   '一食堂门口',
   '图书馆大厅',

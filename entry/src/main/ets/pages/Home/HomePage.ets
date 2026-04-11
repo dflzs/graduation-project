@@ -8,6 +8,7 @@ import { productRepository } from '../../repositories/product.repo';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { Announcement, Product, User } from '../../types/domain';
 import { resolveVisibleRemoteHomeProducts } from '../../utils/product-feed';
+import { openPublishEntry } from '../../utils/publish-entry';
 import { buildProductRowRenderKey } from '../../utils/render-keys';
 
 const DEFAULT_EMPTY_TEXT: string = '\u6682\u65e0\u5546\u54c1';
@@ -345,7 +346,7 @@ export struct HomePage {
         .fontColor('#2F6BFF')
         .backgroundColor('#E8F0FF')
         .padding({ left: 14, right: 14 })
-        .onClick(() => pushUrlByContext(this, { url: 'pages/Product/PublishProductPage' }))
+        .onClick(() => openPublishEntry(this, appContext.getCurrentUser()))
     }
     .width('100%')
   }

@@ -4,6 +4,7 @@ import { userRepository } from '../repositories/user.repo';
 import { ChatMessage, ChatThread, ChatThreadRecord, OperationResult } from '../types/domain';
 import { ChatService } from '../types/service-contracts';
 import { newId } from '../utils/id';
+import { canCurrentUserJoinTrade } from '../utils/trade-guard';
 import { syncService } from './sync.service.impl';
 
 export class ChatServiceImpl implements ChatService {
@@ -12,6 +13,11 @@ export class ChatServiceImpl implements ChatService {
   }
 
   listThreads(userId: string): ChatThread[] {
+    const currentUser = userRepository.getById(userId);
+    if (!canCurrentUserJoinTrade(currentUser)) {
+      return [];
+    }
+
     return chatRepository.listThreads()
       .filter((thread: ChatThreadRecord) => thread.buyerId === userId || thread.sellerId === userId)
       .map((thread: ChatThreadRecord) => this.toThreadView(thread, userId))
@@ -24,6 +30,11 @@ export class ChatServiceImpl implements ChatService {
   }
 
   getThread(threadId: string, viewerId: string): ChatThread | null {
+    const viewer = userRepository.getById(viewerId);
+    if (!canCurrentUserJoinTrade(viewer)) {
+      return null;
+    }
+
     const thread: ChatThreadRecord | null = chatRepository.getThreadById(threadId);
     if (!thread || !this.isThreadParticipant(thread, viewerId)) {
       return null;
@@ -38,6 +49,12 @@ export class ChatServiceImpl implements ChatService {
   openProductThread(productId: string, buyerId: string, sellerId: string): OperationResult<string> {
     if (productId.trim().length === 0 || buyerId.trim().length === 0 || sellerId.trim().length === 0) {
       return { ok: false, message: '会话参数不完整' };
+    }
+
+    const buyer = userRepository.getById(buyerId);
+    const seller = userRepository.getById(sellerId);
+    if (!canCurrentUserJoinTrade(buyer) || !canCurrentUserJoinTrade(seller)) {
+      return { ok: false, message: '管理员账号不支持参与商品沟通' };
     }
 
     const existing: ChatThreadRecord | null = chatRepository.findThread(productId, buyerId, sellerId);
@@ -63,6 +80,11 @@ export class ChatServiceImpl implements ChatService {
   sendMessage(threadId: string, fromUserId: string, content: string): OperationResult<ChatMessage> {
     if (content.trim().length === 0) {
       return { ok: false, message: '消息内容不能为空' };
+    }
+
+    const sender = userRepository.getById(fromUserId);
+    if (!canCurrentUserJoinTrade(sender)) {
+      return { ok: false, message: '管理员账号不支持发送交易沟通消息' };
     }
 
     const thread: ChatThreadRecord | null = chatRepository.getThreadById(threadId);
@@ -107,6 +129,11 @@ export class ChatServiceImpl implements ChatService {
 
   markThreadRead(threadId: string, viewerId: string): void {
     if (threadId.trim().length === 0 || viewerId.trim().length === 0) {
+      return;
+    }
+
+    const viewer = userRepository.getById(viewerId);
+    if (!canCurrentUserJoinTrade(viewer)) {
       return;
     }
 

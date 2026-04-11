@@ -3,6 +3,11 @@ import { appContext } from '../../app/app-context';
 import { ChatThread, MessageNotification, NotificationType, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
 import { buildReminderRenderKey, buildThreadRenderKey } from '../../utils/render-keys';
+import {
+  buildMessageHubAudiencePresentation,
+  MessageHubAudiencePresentation
+} from '../../utils/marketplace-audience-ui';
+import { getMarketplaceAudienceMode, MarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -98,6 +103,25 @@ export struct MessageHubPage {
     this.threads = appContext.chat.listThreads(this.currentUser.id);
   }
 
+  private audienceMode(): MarketplaceAudienceMode {
+    return getMarketplaceAudienceMode(this.currentUser);
+  }
+
+  private audiencePresentation(): MessageHubAudiencePresentation {
+    return buildMessageHubAudiencePresentation(this.audienceMode());
+  }
+
+  private openAudiencePrimaryAction(): void {
+    const presentation: MessageHubAudiencePresentation = this.audiencePresentation();
+    if (presentation.primaryAction === 'login') {
+      pushUrlByContext(this, { url: 'pages/Auth/LoginPage' });
+      return;
+    }
+    if (presentation.primaryAction === 'admin') {
+      pushUrlByContext(this, { url: 'pages/Admin/AdminDashboardPage' });
+    }
+  }
+
   private getReminderUnreadCount(): number {
     return this.reminders.filter((item: MessageNotification) => !item.isRead).length;
   }
@@ -111,7 +135,10 @@ export struct MessageHubPage {
     }
     appContext.notification.markAllRead(this.currentUser.id);
     this.refresh();
-    showToastByContext(this, { message: '交易提醒已全部设为已读', duration: 1200 });
+    showToastByContext(this, {
+      message: this.audienceMode() === 'admin' ? '后台提醒已全部设为已读' : '交易提醒已全部设为已读',
+      duration: 1200
+    });
   }
 
   private openReminder(item: MessageNotification): void {
@@ -168,7 +195,7 @@ export struct MessageHubPage {
           .fontWeight(FontWeight.Bold)
           .fontColor(TITLE_COLOR)
 
-        Text('把交易提醒和商品沟通集中在一起，重要信息会优先出现在上面。')
+        Text(this.audiencePresentation().headerDescription)
           .width('100%')
           .fontSize(14)
           .lineHeight(22)
@@ -377,14 +404,14 @@ export struct MessageHubPage {
   private buildGuestState(): void {
     Column({ space: 16 }) {
       this.buildTopHeader()
-      this.buildInlineEmptyCard('登录后查看消息', '审核结果、订单变化和与卖家的沟通记录都会集中保存在这里。')
+      this.buildInlineEmptyCard(this.audiencePresentation().emptyReminderTitle, this.audiencePresentation().emptyReminderDescription)
 
-      Button('去登录')
+      Button(this.audiencePresentation().emptyPrimaryActionLabel)
         .width('100%')
         .height(46)
         .backgroundColor(PRIMARY_COLOR)
         .borderRadius(18)
-        .onClick(() => pushUrlByContext(this, { url: 'pages/Auth/LoginPage' }))
+        .onClick(() => this.openAudiencePrimaryAction())
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -402,9 +429,25 @@ export struct MessageHubPage {
             this.buildTopHeader()
 
             Column({ space: 14 }) {
-              this.buildSectionTitle('交易提醒', '订单状态、审核结果和系统提醒会优先显示在这里。')
+              this.buildSectionTitle(
+                this.audiencePresentation().reminderSectionTitle,
+                this.audiencePresentation().reminderSectionDescription
+              )
               if (this.reminders.length === 0) {
-                this.buildInlineEmptyCard('暂时没有新的交易提醒', '商品审核、下单、取消和完成交易后，提醒会第一时间出现在这里。')
+                this.buildInlineEmptyCard(
+                  this.audiencePresentation().emptyReminderTitle,
+                  this.audiencePresentation().emptyReminderDescription
+                )
+                if (this.audiencePresentation().primaryAction !== 'none') {
+                  Button(this.audiencePresentation().emptyPrimaryActionLabel)
+                    .width('100%')
+                    .height(44)
+                    .type(ButtonType.Normal)
+                    .backgroundColor('#E8F0FF')
+                    .fontColor(PRIMARY_COLOR)
+                    .borderRadius(16)
+                    .onClick(() => this.openAudiencePrimaryAction())
+                }
               } else {
                 Column({ space: 12 }) {
                   ForEach(this.reminders, (item: MessageNotification) => {
@@ -417,21 +460,29 @@ export struct MessageHubPage {
             .width('100%')
             .alignItems(HorizontalAlign.Start)
 
-            Column({ space: 14 }) {
-              this.buildSectionTitle('会话', '联系卖家之后，这里会保留每件商品对应的沟通记录。')
-              if (this.threads.length === 0) {
-                this.buildInlineEmptyCard('还没有开始新的商品沟通', '去商品详情联系卖家后，会话会自动出现在这里，方便继续确认时间、地点和交易细节。')
-              } else {
-                Column({ space: 12 }) {
-                  ForEach(this.threads, (thread: ChatThread) => {
-                    this.buildThreadCard(thread)
-                  }, (thread: ChatThread) => buildThreadRenderKey(thread))
+            if (this.audiencePresentation().showThreads) {
+              Column({ space: 14 }) {
+                this.buildSectionTitle(
+                  this.audiencePresentation().threadSectionTitle,
+                  this.audiencePresentation().threadSectionDescription
+                )
+                if (this.threads.length === 0) {
+                  this.buildInlineEmptyCard(
+                    this.audiencePresentation().emptyThreadTitle,
+                    this.audiencePresentation().emptyThreadDescription
+                  )
+                } else {
+                  Column({ space: 12 }) {
+                    ForEach(this.threads, (thread: ChatThread) => {
+                      this.buildThreadCard(thread)
+                    }, (thread: ChatThread) => buildThreadRenderKey(thread))
+                  }
+                  .width('100%')
                 }
-                .width('100%')
               }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)

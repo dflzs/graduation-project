@@ -6,6 +6,7 @@ import { LoadingState } from '../../components/LoadingState';
 import { productRepository } from '../../repositories/product.repo';
 import { remoteProductClient } from '../../services/product-remote.client';
 import { Product } from '../../types/domain';
+import { openPublishEntry } from '../../utils/publish-entry';
 import { buildProductRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
 
@@ -154,7 +155,7 @@ struct MyPublishedProductsPage {
         .fontColor('#2F6BFF')
         .backgroundColor('#E8F0FF')
         .padding({ left: 14, right: 14 })
-        .onClick(() => pushUrlByContext(this, { url: 'pages/Product/PublishProductPage' }))
+        .onClick(() => openPublishEntry(this, appContext.getCurrentUser()))
     }
     .width('100%')
   }

@@ -1,6 +1,7 @@
-﻿import { pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
+import { pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext, DashboardStats } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
+import { AdminNavEntry, getAdminDashboardEntries } from '../../utils/admin-navigation';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const SURFACE_BACKGROUND: string = '#FFFDFC';
@@ -64,15 +65,15 @@ struct AdminDashboardPage {
   }
 
   @Builder
-  private buildEntryCard(title: string, description: string, url: string, accent: string): void {
+  private buildEntryCard(item: AdminNavEntry): void {
     Row({ space: 12 }) {
       Column({ space: 5 }) {
-        Text(title)
+        Text(item.title)
           .fontSize(17)
           .fontWeight(FontWeight.Bold)
           .fontColor(TITLE_COLOR)
 
-        Text(description)
+        Text(item.description)
           .fontSize(13)
           .lineHeight(20)
           .fontColor(SUB_TEXT_COLOR)
@@ -83,14 +84,14 @@ struct AdminDashboardPage {
       Text('进入')
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
-        .fontColor(accent)
+        .fontColor(item.accent)
     }
     .width('100%')
     .padding(16)
     .backgroundColor(SURFACE_BACKGROUND)
     .borderRadius(20)
     .border({ width: 1, color: BORDER_COLOR })
-    .onClick(() => pushUrlByContext(this, { url }))
+    .onClick(() => pushUrlByContext(this, { url: item.url }))
   }
 
   build() {
@@ -103,7 +104,7 @@ struct AdminDashboardPage {
               .fontWeight(FontWeight.Bold)
               .fontColor(TITLE_COLOR)
 
-            Text('从这里统一查看平台运行情况，处理商品审核、用户治理和公告维护。')
+            Text('从这里统一查看平台运行情况，处理商品审核、认证审核、用户治理和公告维护。')
               .fontSize(14)
               .lineHeight(22)
               .fontColor(SUB_TEXT_COLOR)
@@ -166,9 +167,9 @@ struct AdminDashboardPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(TITLE_COLOR)
 
-          this.buildEntryCard('商品管理', '审核新发布商品，处理在售状态与强制下架。', 'pages/Admin/AdminProductsPage', '#2F6BFF')
-          this.buildEntryCard('用户管理', '查看用户身份、信用分与账号状态。', 'pages/Admin/AdminUsersPage', '#B8643C')
-          this.buildEntryCard('公告管理', '维护平台公告，让首页通知和规则保持最新。', 'pages/Admin/AdminAnnouncementPage', '#2D2A26')
+          ForEach(getAdminDashboardEntries(), (item: AdminNavEntry) => {
+            this.buildEntryCard(item)
+          }, (item: AdminNavEntry) => item.url)
         }
         .width('100%')
       }

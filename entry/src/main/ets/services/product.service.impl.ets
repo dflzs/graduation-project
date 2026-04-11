@@ -37,6 +37,15 @@ export class ProductServiceImpl implements ProductService {
       category,
       images: input.images ?? [],
       locationTag: input.locationTag ?? '图书馆大厅',
+      schoolId: input.schoolId,
+      schoolName: input.schoolName,
+      campusId: input.campusId,
+      campusName: input.campusName,
+      locationGroupId: input.locationGroupId,
+      locationGroupName: input.locationGroupName,
+      tradeLocationId: input.tradeLocationId,
+      tradeLocationName: input.tradeLocationName,
+      locationSafetyTips: input.locationSafetyTips,
       status: 'pending_review',
       isDeleted: false,
       createdAt: now,
@@ -65,6 +74,15 @@ export class ProductServiceImpl implements ProductService {
     product.price = input.price ?? product.price;
     product.category = input.category ?? product.category;
     product.locationTag = input.locationTag ?? product.locationTag;
+    product.schoolId = input.schoolId ?? product.schoolId;
+    product.schoolName = input.schoolName ?? product.schoolName;
+    product.campusId = input.campusId ?? product.campusId;
+    product.campusName = input.campusName ?? product.campusName;
+    product.locationGroupId = input.locationGroupId ?? product.locationGroupId;
+    product.locationGroupName = input.locationGroupName ?? product.locationGroupName;
+    product.tradeLocationId = input.tradeLocationId ?? product.tradeLocationId;
+    product.tradeLocationName = input.tradeLocationName ?? product.tradeLocationName;
+    product.locationSafetyTips = input.locationSafetyTips ?? product.locationSafetyTips;
     product.updatedAt = Date.now();
 
     productRepository.save(product);

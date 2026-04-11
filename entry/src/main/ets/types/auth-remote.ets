@@ -1,3 +1,5 @@
+import { VerificationMethod, VerificationStatus } from './domain';
+
 export interface RemoteAuthUser {
   id: number;
   phone: string;
@@ -6,6 +8,22 @@ export interface RemoteAuthUser {
   role: string;
   status: string;
   credit_score: number;
+  school_id?: string;
+  school_name?: string;
+  campus_id?: string;
+  campus_name?: string;
+  student_no?: string;
+  grade_year?: number;
+  college_name?: string;
+  major_name?: string;
+  verification_status?: VerificationStatus;
+  verification_method?: VerificationMethod;
+  verified_at?: number;
+  verification_rejected_reason?: string;
+  verification_updated_at?: number;
+  completed_order_count?: number;
+  report_count?: number;
+  last_active_at?: number;
 }
 
 export interface RemoteAuthData {
@@ -114,9 +132,30 @@ export class TicketRegisterPayload extends DirectRegisterPayload {
 export class RemoteUpdateMePayload {
   nickname: string = '';
   avatar: string = '';
+  school_id?: string;
+  campus_id?: string;
+  student_no?: string;
+  grade_year?: number;
+  college_name?: string;
+  major_name?: string;
 
-  constructor(nickname: string, avatar: string) {
+  constructor(
+    nickname: string,
+    avatar: string,
+    schoolId?: string,
+    campusId?: string,
+    studentNo?: string,
+    gradeYear?: number,
+    collegeName?: string,
+    majorName?: string
+  ) {
     this.nickname = nickname;
     this.avatar = avatar;
+    this.school_id = schoolId;
+    this.campus_id = campusId;
+    this.student_no = studentNo;
+    this.grade_year = gradeYear;
+    this.college_name = collegeName;
+    this.major_name = majorName;
   }
 }
