@@ -1,5 +1,6 @@
-﻿import { localDb } from '../data/db/local-db';
+import { localDb } from '../data/db/local-db';
 import { OrderStatus, Product, ProductStatus } from '../types/domain';
+import { syncService } from '../services/sync.service.impl';
 import { orderRepository } from './order.repo';
 
 export interface ProductSearchInput {
@@ -48,6 +49,14 @@ export class ProductRepository {
 
     localDb.setProducts(products);
     return product;
+  }
+
+  private publishProductFeedChange(product: Product): void {
+    syncService.publish({
+      key: 'products:changed',
+      value: product.id,
+      updatedAt: product.updatedAt
+    });
   }
 
   list(): Product[] {
@@ -104,7 +113,9 @@ export class ProductRepository {
         }
       : product;
 
-    return this.persist(nextProduct);
+    const persistedProduct = this.persist(nextProduct);
+    this.publishProductFeedChange(persistedProduct);
+    return persistedProduct;
   }
 
   updateStatus(productId: string, status: ProductStatus): Product | null {

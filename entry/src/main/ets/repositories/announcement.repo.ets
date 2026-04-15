@@ -20,6 +20,11 @@ export class AnnouncementRepository {
     return announcement;
   }
 
+  replaceAll(announcements: Announcement[]): Announcement[] {
+    localDb.setAnnouncements(announcements);
+    return this.list();
+  }
+
   getById(announcementId: string): Announcement | null {
     const item: Announcement | undefined = localDb.getAnnouncements()
       .find((announcement: Announcement) => announcement.id === announcementId);

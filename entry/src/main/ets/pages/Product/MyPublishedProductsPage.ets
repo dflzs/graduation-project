@@ -3,12 +3,24 @@ import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
-import { productRepository } from '../../repositories/product.repo';
-import { remoteProductClient } from '../../services/product-remote.client';
-import { Product } from '../../types/domain';
+import { Product, User } from '../../types/domain';
+import {
+  buildCampusTrustListSnippet,
+  buildCampusTrustTonePalette,
+  buildPublicCampusTrustPresentation,
+  CampusTrustListSnippet,
+  CampusTrustPresentation
+} from '../../utils/campus-trust-ui';
+import {
+  buildMarketplaceUserSyncKeys,
+  buildMyPublishedAudiencePresentation,
+  MarketplacePrimaryAction,
+  MyPublishedAudiencePresentation
+} from '../../utils/marketplace-audience-ui';
 import { openPublishEntry } from '../../utils/publish-entry';
 import { buildProductRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
+import { canViewTradeHistory, getMarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -85,41 +97,126 @@ function getPublishedStatusBackground(status: string): string {
 @Entry
 @Component
 struct MyPublishedProductsPage {
+  @State currentUser: User | null = null;
   @State products: Product[] = [];
   @State isLoading: boolean = false;
   @State errorText: string = '';
+  private productSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     void this.refresh();
+    this.bindProductSync();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
     void this.refresh();
   }
 
+  aboutToDisappear(): void {
+    if (this.productSyncUnsubscriber) {
+      this.productSyncUnsubscriber();
+      this.productSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindProductSync(): void {
+    if (this.productSyncUnsubscriber) {
+      return;
+    }
+    this.productSyncUnsubscriber = appContext.sync.subscribe('products:changed', () => {
+      void this.refresh();
+    });
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.refresh();
+      })
+    );
+  }
+
   private async refresh(): Promise<void> {
+    this.currentUser = appContext.getCurrentUser();
     const session = appContext.getSession();
     if (!session) {
       showToastByContext(this, { message: '请先登录', duration: 1500 });
       replaceUrlByContext(this, { url: 'pages/Auth/LoginPage' });
       return;
     }
+    if (!canViewTradeHistory(this.currentUser)) {
+      this.products = [];
+      this.errorText = '';
+      this.isLoading = false;
+      return;
+    }
 
     this.isLoading = true;
-    const result = await remoteProductClient.listMyProducts(session.token);
+    const result = await appContext.marketplaceProducts.listMyPublishedProducts(session.currentUser.id);
     if (!result.ok || !result.data) {
-      this.products = productRepository.list()
-        .filter((item: Product) => item.sellerId === session.currentUser.id && !item.isDeleted)
-        .sort((a: Product, b: Product) => b.createdAt - a.createdAt);
+      this.products = [];
       this.errorText = result.message;
       this.isLoading = false;
       return;
     }
 
-    this.products = result.data.sort((a: Product, b: Product) => b.createdAt - a.createdAt);
-    this.products.forEach((item: Product) => productRepository.mergeRemote(item));
+    this.products = result.data;
     this.errorText = '';
     this.isLoading = false;
+  }
+
+  private audiencePresentation(): MyPublishedAudiencePresentation {
+    return buildMyPublishedAudiencePresentation(getMarketplaceAudienceMode(this.currentUser));
+  }
+
+  private openAudiencePrimaryAction(): void {
+    const action: MarketplacePrimaryAction = this.audiencePresentation().primaryAction;
+    if (action === 'login') {
+      replaceUrlByContext(this, { url: 'pages/Auth/LoginPage' });
+      return;
+    }
+    if (action === 'profile') {
+      pushUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
+      return;
+    }
+    if (action === 'admin') {
+      pushUrlByContext(this, { url: 'pages/Admin/AdminDashboardPage' });
+      return;
+    }
+    openPublishEntry(this, this.currentUser);
+  }
+
+  private getCurrentUserTrustPresentation(): CampusTrustPresentation {
+    return buildPublicCampusTrustPresentation(this.currentUser);
+  }
+
+  private getCurrentUserTrustSnippet(): CampusTrustListSnippet {
+    return buildCampusTrustListSnippet(this.currentUser, 3);
+  }
+
+  private getTrustOverviewBackground(): string {
+    return buildCampusTrustTonePalette(this.getCurrentUserTrustPresentation().tone).surfaceBackgroundColor;
+  }
+
+  private getTrustOverviewTagsText(): string {
+    const snippet = this.getCurrentUserTrustSnippet();
+    const suffix = snippet.hasMoreTags ? ' · ...' : '';
+    return `${snippet.tags.join(' · ')}${suffix}`;
+  }
+
+  private getTrustOverviewRiskTextColor(): string {
+    return buildCampusTrustTonePalette(this.getCurrentUserTrustPresentation().tone).riskBadgeTextColor;
+  }
+
+  private getTrustOverviewRiskBackground(): string {
+    return buildCampusTrustTonePalette(this.getCurrentUserTrustPresentation().tone).riskBadgeBackgroundColor;
   }
 
   @Builder
@@ -131,7 +228,7 @@ struct MyPublishedProductsPage {
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text('这里会显示你的商品审核状态、交易状态和最近发布时间。')
+      Text(this.audiencePresentation().headerDescription)
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
@@ -142,20 +239,85 @@ struct MyPublishedProductsPage {
   }
 
   @Builder
+  private buildTrustOverviewCard(): void {
+    Column({ space: 10 }) {
+      Row({ space: 8 }) {
+        Text('对外可信展示')
+          .fontSize(14)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(TITLE_COLOR)
+
+        Blank()
+
+        Text(this.getCurrentUserTrustPresentation().badgeText)
+          .fontSize(10)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.getCurrentUserTrustPresentation().badgeTextColor)
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.getCurrentUserTrustPresentation().badgeBackgroundColor)
+          .borderRadius(12)
+
+        Text(this.getCurrentUserTrustSnippet().riskLabel)
+          .fontSize(10)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.getTrustOverviewRiskTextColor())
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.getTrustOverviewRiskBackground())
+          .borderRadius(12)
+      }
+      .width('100%')
+
+      Text(this.getCurrentUserTrustPresentation().summary)
+        .width('100%')
+        .fontSize(13)
+        .lineHeight(19)
+        .fontColor(TITLE_COLOR)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+      if (this.getCurrentUserTrustSnippet().tags.length > 0) {
+        Text(this.getTrustOverviewTagsText())
+          .width('100%')
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor(SUB_TEXT_COLOR)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+
+      Text(this.getCurrentUserTrustPresentation().riskText)
+        .width('100%')
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor(SUB_TEXT_COLOR)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .padding(14)
+    .backgroundColor(this.getTrustOverviewBackground())
+    .borderRadius(18)
+    .border({
+      width: 1,
+      color: '#E7DED2'
+    })
+  }
+
+  @Builder
   private buildEmptyState(): void {
     Column({ space: 12 }) {
       EmptyState({
-        title: '你还没有发布过商品',
-        description: '发布后会先进入审核，审核通过后才会显示在首页。'
+        title: this.audiencePresentation().emptyTitle,
+        description: this.audiencePresentation().emptyDescription
       })
 
-      Button('去发布商品')
+      Button(this.audiencePresentation().emptyPrimaryActionLabel)
         .height(42)
         .type(ButtonType.Normal)
         .fontColor('#2F6BFF')
         .backgroundColor('#E8F0FF')
         .padding({ left: 14, right: 14 })
-        .onClick(() => openPublishEntry(this, appContext.getCurrentUser()))
+        .onClick(() => this.openAudiencePrimaryAction())
     }
     .width('100%')
   }
@@ -239,6 +401,10 @@ struct MyPublishedProductsPage {
     Scroll() {
       Column({ space: 14 }) {
         this.buildHeader()
+
+        if (this.currentUser && canViewTradeHistory(this.currentUser)) {
+          this.buildTrustOverviewCard()
+        }
 
         if (this.errorText.length > 0 && this.products.length > 0) {
           Text(this.errorText)

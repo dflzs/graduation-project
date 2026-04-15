@@ -1,12 +1,30 @@
 const pool = require('../config/db');
 const { success, fail } = require('../utils/response');
 
+const ALLOWED_USER_STATUSES = ['active', 'restricted', 'muted', 'suspended', 'banned'];
+
 function ensureAdmin(req, res) {
   if (req.user.role !== 'admin') {
     res.status(403).json(fail('只有管理员可以访问该接口'));
     return false;
   }
   return true;
+}
+
+function getStatusUpdateMessage(status) {
+  if (status === 'active') {
+    return '用户已恢复为正常状态';
+  }
+  if (status === 'restricted') {
+    return '用户已设置为限制交易';
+  }
+  if (status === 'muted') {
+    return '用户已设置为聊天禁言';
+  }
+  if (status === 'suspended') {
+    return '用户已设置为暂时停用';
+  }
+  return '用户封禁成功';
 }
 
 async function queryProductById(productId) {
@@ -29,22 +47,12 @@ async function dashboard(req, res) {
   try {
     if (!ensureAdmin(req, res)) return;
 
-    const [[userCountRow]] = await pool.query(
-      `SELECT COUNT(*) AS total FROM users`
-    );
-
-    const [[productCountRow]] = await pool.query(
-      `SELECT COUNT(*) AS total FROM products`
-    );
-
-    const [[orderCountRow]] = await pool.query(
-      `SELECT COUNT(*) AS total FROM orders`
-    );
-
+    const [[userCountRow]] = await pool.query('SELECT COUNT(*) AS total FROM users');
+    const [[productCountRow]] = await pool.query('SELECT COUNT(*) AS total FROM products');
+    const [[orderCountRow]] = await pool.query('SELECT COUNT(*) AS total FROM orders');
     const [[completedOrderCountRow]] = await pool.query(
       `SELECT COUNT(*) AS total FROM orders WHERE status = 'completed'`
     );
-
     const [[announcementCountRow]] = await pool.query(
       `SELECT COUNT(*) AS total FROM announcements WHERE is_deleted = 0`
     );
@@ -90,8 +98,8 @@ async function updateUserStatus(req, res) {
       return res.status(400).json(fail('用户 id 不合法'));
     }
 
-    if (!['active', 'banned'].includes(status)) {
-      return res.status(400).json(fail('用户状态只能是 active 或 banned'));
+    if (!ALLOWED_USER_STATUSES.includes(status)) {
+      return res.status(400).json(fail('用户状态不在允许范围内'));
     }
 
     const [rows] = await pool.query(
@@ -105,7 +113,7 @@ async function updateUserStatus(req, res) {
 
     const user = rows[0];
     if (user.role === 'admin') {
-      return res.status(400).json(fail('不能封禁管理员账号'));
+      return res.status(400).json(fail('不能修改管理员账号状态'));
     }
 
     await pool.query(
@@ -123,7 +131,7 @@ async function updateUserStatus(req, res) {
       [userId]
     );
 
-    return res.json(success(updatedRows[0], status === 'banned' ? '用户封禁成功' : '用户恢复成功'));
+    return res.json(success(updatedRows[0], getStatusUpdateMessage(status)));
   } catch (error) {
     return res.status(500).json(fail(`更新用户状态失败: ${error.message}`));
   }
@@ -164,11 +172,7 @@ async function approveProduct(req, res) {
       return res.status(404).json(fail('商品不存在'));
     }
 
-    await pool.query(
-      `UPDATE products SET status = 'on_sale' WHERE id = ?`,
-      [productId]
-    );
-
+    await pool.query(`UPDATE products SET status = 'on_sale' WHERE id = ?`, [productId]);
     const updatedProduct = await queryProductById(productId);
     return res.json(success(updatedProduct, '商品审核通过'));
   } catch (error) {
@@ -190,11 +194,7 @@ async function rejectProduct(req, res) {
       return res.status(404).json(fail('商品不存在'));
     }
 
-    await pool.query(
-      `UPDATE products SET status = 'rejected' WHERE id = ?`,
-      [productId]
-    );
-
+    await pool.query(`UPDATE products SET status = 'rejected' WHERE id = ?`, [productId]);
     const updatedProduct = await queryProductById(productId);
     return res.json(success(updatedProduct, '商品已驳回'));
   } catch (error) {
@@ -216,11 +216,7 @@ async function forceOffShelfProduct(req, res) {
       return res.status(404).json(fail('商品不存在'));
     }
 
-    await pool.query(
-      `UPDATE products SET status = 'off_shelf' WHERE id = ?`,
-      [productId]
-    );
-
+    await pool.query(`UPDATE products SET status = 'off_shelf' WHERE id = ?`, [productId]);
     const updatedProduct = await queryProductById(productId);
     return res.json(success(updatedProduct, '商品强制下架成功'));
   } catch (error) {

@@ -12,12 +12,14 @@ import {
   getCartCardBorder
 } from '../utils/cart-visuals';
 import {
+  buildMarketplaceUserSyncKeys,
   buildCartAudiencePresentation,
   CartAudiencePresentation
 } from '../utils/marketplace-audience-ui';
 import {
   canCurrentUserJoinTrade,
   canUserTradeProduct,
+  getTradeEntryDeniedMessage,
   getMarketplaceAudienceMode,
   isProductOwnedByUser
 } from '../utils/trade-guard';
@@ -39,9 +41,11 @@ export struct CartContent {
   @State private manageMode: boolean = false;
   private unsubscriber: (() => void) | null = null;
   private subscribedUserId: string = '';
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     this.refresh();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
@@ -54,6 +58,19 @@ export struct CartContent {
       this.unsubscriber = null;
     }
     this.subscribedUserId = '';
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.refresh();
+      })
+    );
   }
 
   private bindSync(userId: string): void {
@@ -136,6 +153,10 @@ export struct CartContent {
     }
     if (presentation.primaryAction === 'admin') {
       pushUrlByContext(this, { url: 'pages/Admin/AdminDashboardPage' });
+      return;
+    }
+    if (presentation.primaryAction === 'profile') {
+      pushUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
     }
   }
 
@@ -146,7 +167,8 @@ export struct CartContent {
   private canSettleItem(item: CartItem): boolean {
     const userId: string = this.currentUser?.id ?? '';
     const userRole = this.currentUser?.role;
-    return canUserTradeProduct(this.getProduct(item), userId, userRole);
+    const userStatus = this.currentUser?.status ?? 'active';
+    return canUserTradeProduct(this.getProduct(item), userId, userRole, userStatus);
   }
 
   private isSelfOwnedCartItem(item: CartItem): boolean {
@@ -349,7 +371,7 @@ export struct CartContent {
       return;
     }
     if (!canCurrentUserJoinTrade(this.currentUser)) {
-      showToastByContext(this, { message: '管理员账号不支持购物车结算', duration: 1500 });
+      showToastByContext(this, { message: getTradeEntryDeniedMessage(this.currentUser, 'cart'), duration: 1500 });
       return;
     }
 

@@ -4,6 +4,8 @@ import { EmptyState } from '../../components/EmptyState';
 import { Announcement, User } from '../../types/domain';
 import { buildAnnouncementRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
+import { canAccessAdmin, getAdminAccessDeniedMessage, getAdminActionDeniedMessage } from '../../services/guard.service';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const SURFACE_BACKGROUND: string = '#FFFDFC';
@@ -17,51 +19,84 @@ struct AdminAnnouncementPage {
   @State title: string = '';
   @State content: string = '';
   @State list: Announcement[] = [];
+  private announcementSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
-    this.refresh();
+    void this.refresh();
+    this.bindAnnouncementSync();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
-    this.refresh();
+    void this.refresh();
   }
 
-  private refresh(): void {
+  aboutToDisappear(): void {
+    if (this.announcementSyncUnsubscriber) {
+      this.announcementSyncUnsubscriber();
+      this.announcementSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindAnnouncementSync(): void {
+    if (this.announcementSyncUnsubscriber) {
+      return;
+    }
+    this.announcementSyncUnsubscriber = appContext.sync.subscribe('announcements:changed', () => {
+      void this.refresh();
+    });
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.refresh();
+      })
+    );
+  }
+
+  private async refresh(): Promise<void> {
     if (!appContext.isAdmin()) {
-      showToastByContext(this, { message: '仅管理员可访问', duration: 1500 });
+      showToastByContext(this, { message: getAdminAccessDeniedMessage(appContext.getCurrentUser()), duration: 1500 });
       replaceUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
       return;
     }
-    this.list = appContext.announcement.list();
+    this.list = await appContext.announcement.list();
   }
 
-  private publish(): void {
+  private async publish(): Promise<void> {
     const user: User | null = appContext.getCurrentUser();
-    if (!user || user.role !== 'admin') {
-      showToastByContext(this, { message: '仅管理员可发布公告', duration: 1200 });
+    if (!user || !canAccessAdmin(user)) {
+      showToastByContext(this, { message: getAdminActionDeniedMessage(user), duration: 1200 });
       return;
     }
 
-    const result = appContext.announcement.publish(this.title, this.content, user.id);
+    const result = await appContext.announcement.publish(this.title, this.content, user.id);
     showToastByContext(this, { message: result.message, duration: 1200 });
     if (result.ok) {
       this.title = '';
       this.content = '';
-      this.refresh();
+      void this.refresh();
     }
   }
 
-  private remove(announcementId: string): void {
+  private async remove(announcementId: string): Promise<void> {
     const user: User | null = appContext.getCurrentUser();
-    if (!user || user.role !== 'admin') {
-      showToastByContext(this, { message: '仅管理员可删除公告', duration: 1200 });
+    if (!user || !canAccessAdmin(user)) {
+      showToastByContext(this, { message: getAdminActionDeniedMessage(user), duration: 1200 });
       return;
     }
 
-    const result = appContext.announcement.delete(announcementId, user.id);
+    const result = await appContext.announcement.delete(announcementId, user.id);
     showToastByContext(this, { message: result.message, duration: 1200 });
     if (result.ok) {
-      this.refresh();
+      void this.refresh();
     }
   }
 
@@ -113,7 +148,9 @@ struct AdminAnnouncementPage {
         .height(44)
         .fontColor('#FFFFFF')
         .backgroundColor('#2F6BFF')
-        .onClick(() => this.publish())
+        .onClick(() => {
+          void this.publish();
+        })
     }
     .width('100%')
     .padding(16)
@@ -145,7 +182,9 @@ struct AdminAnnouncementPage {
           .fontColor('#B8643C')
           .backgroundColor('#F4E6DE')
           .padding({ left: 12, right: 12 })
-          .onClick(() => this.remove(item.id))
+          .onClick(() => {
+            void this.remove(item.id);
+          })
       }
       .width('100%')
 

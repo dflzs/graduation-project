@@ -14,7 +14,15 @@ export class PublishEntryTarget {
 }
 
 export function resolvePublishEntryTarget(currentUser: User | null): PublishEntryTarget {
-  if (currentUser?.role === 'admin') {
+  if (!currentUser) {
+    return new PublishEntryTarget('pages/Auth/LoginPage', true, '请先登录后再发布商品');
+  }
+
+  if (currentUser.status !== 'active') {
+    return new PublishEntryTarget('pages/Profile/ProfilePage', false, '该账号已被停用，无法发布商品');
+  }
+
+  if (currentUser.role === 'admin') {
     return new PublishEntryTarget(
       'pages/Admin/AdminDashboardPage',
       false,
@@ -22,11 +30,7 @@ export function resolvePublishEntryTarget(currentUser: User | null): PublishEntr
     );
   }
 
-  if (currentUser) {
-    return new PublishEntryTarget('pages/Product/PublishProductPage', false);
-  }
-
-  return new PublishEntryTarget('pages/Auth/LoginPage', true, '\u8bf7\u5148\u767b\u5f55\u540e\u518d\u53d1\u5e03\u5546\u54c1');
+  return new PublishEntryTarget('pages/Product/PublishProductPage', false);
 }
 
 export function openPublishEntry(host: UiContextHost, currentUser: User | null): void {

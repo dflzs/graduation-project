@@ -1,11 +1,29 @@
 ﻿import { backByContext, getParamsByContext, pushUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
 import { CAMPUS_TRADE_QUICK_REPLIES } from '../../constants/message-quick-replies';
+import { replaceUrlByContext } from '../../utils/ui-context-actions';
+import { chatRepository } from '../../repositories/chat.repo';
 import { productRepository } from '../../repositories/product.repo';
 import { userRepository } from '../../repositories/user.repo';
 import { ChatMessage, ChatThread, Product, ProductStatus, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
-import { buildPublicCampusTrustPresentation, CampusTrustPresentation } from '../../utils/campus-trust-ui';
+import {
+  buildCampusTrustTonePalette,
+  buildPublicCampusTrustPresentation,
+  CampusTrustPresentation
+} from '../../utils/campus-trust-ui';
+import { buildChatDetailReturnTarget } from '../../utils/detail-return-route';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
+import {
+  canAccessTradeRecord,
+  canCurrentUserOperateTrade,
+  canCurrentUserSendTradeMessage,
+  canViewTradeHistory,
+  getTradeReadOnlyHint,
+  getTradeRecordUnavailableDescription,
+  getTradeRecordUnavailableTitle,
+  shouldTreatTradeRecordAsAccessDenied
+} from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -66,18 +84,23 @@ struct ChatDetailPage {
   @State private product: Product | null = null;
   @State private messages: ChatMessage[] = [];
   @State private draft: string = '';
+  @State private accessDenied: boolean = false;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     const params = getParamsByContext<Record<string, string>>(this);
     this.threadId = params?.threadId ?? '';
-    this.refresh();
+    void this.refresh();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
-    this.refresh();
+    void this.refresh();
   }
 
   aboutToDisappear(): void {
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
     if (this.threadId.length === 0) {
       return;
     }
@@ -88,41 +111,73 @@ struct ChatDetailPage {
     });
   }
 
-  private refresh(): void {
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.refresh();
+      })
+    );
+  }
+
+  private async refresh(): Promise<void> {
     const currentUser = this.getCurrentUser();
     if (!currentUser || this.threadId.length === 0) {
       this.thread = null;
       this.product = null;
       this.messages = [];
+      this.accessDenied = this.threadId.length > 0
+        && shouldTreatTradeRecordAsAccessDenied(currentUser, true, false);
+      return;
+    }
+
+    const threadRecord = chatRepository.getThreadById(this.threadId);
+    const canAccessThread = threadRecord !== null
+      && canAccessTradeRecord(currentUser, [threadRecord.buyerId, threadRecord.sellerId]);
+    if (!canViewTradeHistory(currentUser) || (threadRecord !== null && !canAccessThread)) {
+      this.thread = null;
+      this.product = null;
+      this.messages = [];
+      this.accessDenied = shouldTreatTradeRecordAsAccessDenied(currentUser, threadRecord !== null, canAccessThread);
       return;
     }
 
     appContext.chat.markThreadRead(this.threadId, currentUser.id);
+    const thread = appContext.chat.getThread(this.threadId, currentUser.id);
+    this.messages = thread ? await appContext.chat.getMessages(this.threadId, currentUser.id) : [];
     this.thread = appContext.chat.getThread(this.threadId, currentUser.id);
-    this.messages = this.thread ? appContext.chat.getMessages(this.threadId) : [];
     this.product = this.thread ? productRepository.getById(this.thread.productId) : null;
+    this.accessDenied = false;
   }
 
-  private send(): void {
+  private async send(): Promise<void> {
     const currentUser = this.getCurrentUser();
     if (!currentUser) {
       pushUrlByContext(this, { url: 'pages/Auth/LoginPage' });
       return;
     }
+    if (this.isMessageComposerDisabled()) {
+      return;
+    }
 
-    const result = appContext.chat.sendMessage(this.threadId, currentUser.id, this.draft);
+    const result = await appContext.chat.sendMessage(this.threadId, currentUser.id, this.draft);
     showToastByContext(this, { message: result.message, duration: 1200 });
     if (!result.ok) {
       return;
     }
 
     this.draft = '';
-    this.refresh();
+    void this.refresh();
   }
 
   private sendQuickReply(reply: string): void {
+    if (this.isMessageComposerDisabled()) {
+      return;
+    }
     this.draft = reply;
-    this.send();
+    void this.send();
   }
 
   private getCurrentUser(): User | null {
@@ -131,6 +186,25 @@ struct ChatDetailPage {
 
   private getCurrentUserId(): string {
     return this.getCurrentUser()?.id ?? '';
+  }
+
+  private isReadOnlyConversation(): boolean {
+    return !canCurrentUserOperateTrade(this.getCurrentUser());
+  }
+
+  private isMessageComposerDisabled(): boolean {
+    return !canCurrentUserSendTradeMessage(this.getCurrentUser());
+  }
+
+  private getComposerPlaceholder(): string {
+    const currentUser = this.getCurrentUser();
+    if (currentUser?.status === 'muted') {
+      return '账号当前已被禁言，暂时不能发送新的交易消息';
+    }
+    if (this.isReadOnlyConversation()) {
+      return '账号当前受限，聊天入口已切换为只读';
+    }
+    return '输入你想和对方确认的内容';
   }
 
   private getConversationTitle(): string {
@@ -146,15 +220,59 @@ struct ChatDetailPage {
     return buildPublicCampusTrustPresentation(peerUser);
   }
 
+  private getPeerTrustCardBackground(): string {
+    return buildCampusTrustTonePalette(this.getPeerTrustPresentation().tone).surfaceBackgroundColor;
+  }
+
+  private getPeerTrustRiskTextColor(): string {
+    return buildCampusTrustTonePalette(this.getPeerTrustPresentation().tone).riskBadgeTextColor;
+  }
+
+  private getPeerTrustRiskBackground(): string {
+    return buildCampusTrustTonePalette(this.getPeerTrustPresentation().tone).riskBadgeBackgroundColor;
+  }
+
+  private getPeerTrustTagTextColor(): string {
+    return buildCampusTrustTonePalette(this.getPeerTrustPresentation().tone).tagTextColor;
+  }
+
+  private getPeerTrustTagBackground(): string {
+    return buildCampusTrustTonePalette(this.getPeerTrustPresentation().tone).tagBackgroundColor;
+  }
+
+  private canCurrentUserSubmitModeration(_product: Product): boolean {
+    const currentUser = this.getCurrentUser();
+    return currentUser !== null && currentUser.role === 'user';
+  }
+
+  private leaveUnavailableState(): void {
+    const target = buildChatDetailReturnTarget(this.getCurrentUser());
+    replaceUrlByContext(this, { url: target.url, params: target.params });
+  }
+
+  private openReportPage(): void {
+    if (!this.thread || this.isReadOnlyConversation()) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Moderation/SubmitModerationPage',
+      params: {
+        targetType: 'chat_report',
+        targetId: this.thread.id,
+        title: this.product?.title ?? this.thread.productTitle
+      }
+    });
+  }
+
   @Builder
   private buildEmptyState(): void {
     Column({ space: 12 }) {
-      Text('会话暂时不可用')
+      Text(getTradeRecordUnavailableTitle('chat', this.getCurrentUser(), this.accessDenied))
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text('当前会话不存在或已失效，请返回消息页重新进入。')
+      Text(getTradeRecordUnavailableDescription('chat', this.getCurrentUser(), this.accessDenied))
         .fontSize(14)
         .fontColor(SUB_TEXT_COLOR)
         .textAlign(TextAlign.Center)
@@ -163,7 +281,7 @@ struct ChatDetailPage {
         .width('100%')
         .height(44)
         .backgroundColor(PRIMARY_COLOR)
-        .onClick(() => backByContext(this))
+        .onClick(() => this.leaveUnavailableState())
     }
     .width('100%')
     .padding(20)
@@ -226,21 +344,66 @@ struct ChatDetailPage {
         }
         .width('100%')
 
-        Text(this.getPeerTrustPresentation().summary)
+        Row({ space: 8 }) {
+          Text(this.getPeerTrustPresentation().summary)
+            .layoutWeight(1)
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#4E4740')
+
+          Text(this.getPeerTrustPresentation().riskLabel)
+            .fontSize(11)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.getPeerTrustRiskTextColor())
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.getPeerTrustRiskBackground())
+            .borderRadius(12)
+        }
+        .width('100%')
+
+        if (this.getPeerTrustPresentation().trustTags.length > 0) {
+          Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row }) {
+            ForEach(this.getPeerTrustPresentation().trustTags, (tag: string) => {
+              Text(tag)
+                .fontSize(11)
+                .fontColor(this.getPeerTrustTagTextColor())
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .backgroundColor(this.getPeerTrustTagBackground())
+                .borderRadius(12)
+                .margin({ right: 8, bottom: 8 })
+            }, (tag: string) => tag)
+          }
           .width('100%')
-          .fontSize(13)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#4E4740')
+        }
 
         Text(this.getPeerTrustPresentation().helperText)
           .width('100%')
           .fontSize(12)
           .lineHeight(18)
           .fontColor(SUB_TEXT_COLOR)
+
+        Text(this.getPeerTrustPresentation().riskText)
+          .width('100%')
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor('#8C867F')
+
+        if (this.product && this.canCurrentUserSubmitModeration(this.product)) {
+          Button('举报会话')
+            .width('100%')
+            .height(40)
+            .type(ButtonType.Normal)
+            .fontSize(13)
+            .fontColor('#A86B00')
+            .backgroundColor('#FFF6E6')
+            .border({ width: 1, color: '#E8D8B6' })
+            .borderRadius(14)
+            .onClick(() => this.openReportPage())
+        }
       }
       .width('100%')
       .padding(16)
-      .backgroundColor(CARD_BACKGROUND)
+      .backgroundColor(this.getPeerTrustCardBackground())
       .borderRadius(20)
       .margin({ left: 16, right: 16 })
     }
@@ -254,9 +417,10 @@ struct ChatDetailPage {
           .fontSize(13)
           .fontColor(PRIMARY_COLOR)
           .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .backgroundColor('#E8F0FF')
+          .backgroundColor(this.isMessageComposerDisabled() ? '#F1ECE5' : '#E8F0FF')
           .borderRadius(16)
           .margin({ right: 8, bottom: 8 })
+          .opacity(this.isMessageComposerDisabled() ? 0.6 : 1)
           .onClick(() => this.sendQuickReply(item))
       }, (item: string) => item)
     }
@@ -314,7 +478,28 @@ struct ChatDetailPage {
         .padding({ left: 16, right: 16, top: 16 })
 
         this.buildProductSummary()
-        this.buildQuickReplies()
+        if (this.isReadOnlyConversation()) {
+          Column({ space: 8 }) {
+            Text('当前会话已切换为只读')
+              .width('100%')
+              .fontSize(15)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#B8643C')
+
+            Text(getTradeReadOnlyHint(this.getCurrentUser(), 'chat'))
+              .width('100%')
+              .fontSize(13)
+              .lineHeight(20)
+              .fontColor(SUB_TEXT_COLOR)
+          }
+          .width('100%')
+          .padding(16)
+          .margin({ left: 16, right: 16 })
+          .backgroundColor('#F8ECE4')
+          .borderRadius(20)
+        } else {
+          this.buildQuickReplies()
+        }
 
         Scroll() {
           Column({ space: 10 }) {
@@ -347,12 +532,13 @@ struct ChatDetailPage {
         .width('100%')
 
         Row({ space: 10 }) {
-          TextInput({ placeholder: '输入你想和对方确认的内容', text: this.draft })
+          TextInput({ placeholder: this.getComposerPlaceholder(), text: this.draft })
             .layoutWeight(1)
             .height(46)
             .fontSize(15)
             .backgroundColor('#FFFFFF')
             .borderRadius(16)
+            .enabled(!this.isMessageComposerDisabled())
             .onChange((value: string) => {
               this.draft = value;
             })
@@ -360,10 +546,12 @@ struct ChatDetailPage {
           Button('发送')
             .width(82)
             .height(46)
-            .backgroundColor(PRIMARY_COLOR)
-            .enabled(this.draft.trim().length > 0)
-            .opacity(this.draft.trim().length > 0 ? 1 : 0.6)
-            .onClick(() => this.send())
+            .backgroundColor(this.isMessageComposerDisabled() ? '#D7D0C7' : PRIMARY_COLOR)
+            .enabled(!this.isMessageComposerDisabled() && this.draft.trim().length > 0)
+            .opacity(!this.isMessageComposerDisabled() && this.draft.trim().length > 0 ? 1 : 0.6)
+            .onClick(() => {
+              void this.send();
+            })
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 12, bottom: 18 })

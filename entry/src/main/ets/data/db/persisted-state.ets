@@ -1,5 +1,18 @@
 import { SEED_ANNOUNCEMENTS, SEED_PRODUCTS, SEED_USERS } from '../../constants/seed-data';
-import { Announcement, CartItem, ChatMessage, ChatThreadRecord, MessageNotification, Order, Review, User, Product } from '../../types/domain';
+import {
+  AppealRecord,
+  Announcement,
+  CartItem,
+  ChatMessage,
+  ChatThreadRecord,
+  GovernanceAction,
+  MessageNotification,
+  ModerationRecord,
+  Order,
+  Review,
+  User,
+  Product
+} from '../../types/domain';
 
 export const LOCAL_DB_STORAGE_KEY: string = 'campus_market_local_db';
 export const AUTH_STATE_STORAGE_KEY: string = 'campus_market_auth_state';
@@ -16,6 +29,9 @@ export interface PersistedLocalState {
   chatThreads: ChatThreadRecord[];
   chats: ChatMessage[];
   notifications: MessageNotification[];
+  moderationRecords: ModerationRecord[];
+  appealRecords: AppealRecord[];
+  governanceActions: GovernanceAction[];
 }
 
 export interface PersistedAuthState {
@@ -31,6 +47,23 @@ function clone<T>(input: T): T {
   return JSON.parse(JSON.stringify(input)) as T;
 }
 
+export function normalizeModerationRecord(record: ModerationRecord): ModerationRecord {
+  const normalized: ModerationRecord = clone(record);
+  normalized.evidenceItems = Array.isArray(record.evidenceItems) ? clone(record.evidenceItems) : [];
+  normalized.priority = record.priority ?? 'medium';
+  return normalized;
+}
+
+export function normalizeAppealRecord(record: AppealRecord): AppealRecord {
+  const normalized: AppealRecord = clone(record);
+  normalized.evidenceItems = Array.isArray(record.evidenceItems) ? clone(record.evidenceItems) : [];
+  return normalized;
+}
+
+export function normalizeGovernanceAction(record: GovernanceAction): GovernanceAction {
+  return clone(record);
+}
+
 export function createSeedLocalState(): PersistedLocalState {
   return {
     version: PERSISTED_STATE_VERSION,
@@ -42,7 +75,10 @@ export function createSeedLocalState(): PersistedLocalState {
     announcements: clone(SEED_ANNOUNCEMENTS),
     chatThreads: [],
     chats: [],
-    notifications: []
+    notifications: [],
+    moderationRecords: [],
+    appealRecords: [],
+    governanceActions: []
   };
 }
 
@@ -73,7 +109,16 @@ export function normalizePersistedLocalState(raw: Partial<PersistedLocalState> |
     announcements: Array.isArray(raw.announcements) ? clone(raw.announcements) : seed.announcements,
     chatThreads: Array.isArray(raw.chatThreads) ? clone(raw.chatThreads) : [],
     chats: Array.isArray(raw.chats) ? clone(raw.chats) : [],
-    notifications: Array.isArray(raw.notifications) ? clone(raw.notifications) : []
+    notifications: Array.isArray(raw.notifications) ? clone(raw.notifications) : [],
+    moderationRecords: Array.isArray(raw.moderationRecords)
+      ? raw.moderationRecords.map((record: ModerationRecord) => normalizeModerationRecord(record))
+      : [],
+    appealRecords: Array.isArray(raw.appealRecords)
+      ? raw.appealRecords.map((record: AppealRecord) => normalizeAppealRecord(record))
+      : [],
+    governanceActions: Array.isArray(raw.governanceActions)
+      ? raw.governanceActions.map((record: GovernanceAction) => normalizeGovernanceAction(record))
+      : []
   };
 }
 

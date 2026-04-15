@@ -1,7 +1,13 @@
 import { backByContext, getParamsByContext, pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
 import { Product, User } from '../../types/domain';
-import { canCurrentUserJoinTrade, canUserTradeProduct, isProductOwnedByUser } from '../../utils/trade-guard';
+import {
+  canCurrentUserJoinTrade,
+  canUserTradeProduct,
+  getTradeEntryDeniedMessage,
+  isProductOwnedByUser
+} from '../../utils/trade-guard';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -12,6 +18,8 @@ struct CreateOrderPage {
   @State productId: string = '';
   @State product: Product | null = null;
   @State address: string = '\u56fe\u4e66\u9986\u5927\u5385\uff0c\u5f53\u9762\u4ea4\u63a5';
+  private productSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   private getRecommendedTradeLocationLabel(): string {
     if (!this.product) {
@@ -64,7 +72,39 @@ struct CreateOrderPage {
     if (recommendedLocation.length > 0) {
       this.address = `${recommendedLocation}\uff0c\u5f53\u9762\u4ea4\u63a5`;
     }
+    this.bindProductSync();
+    this.bindUserSync();
     this.guardEntry();
+  }
+
+  aboutToDisappear(): void {
+    if (this.productSyncUnsubscriber) {
+      this.productSyncUnsubscriber();
+      this.productSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindProductSync(): void {
+    if (this.productSyncUnsubscriber) {
+      return;
+    }
+    this.productSyncUnsubscriber = appContext.sync.subscribe('products:changed', () => {
+      this.product = appContext.product.getProductById(this.productId);
+      this.guardEntry();
+    });
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.guardEntry();
+      })
+    );
   }
 
   private guardEntry(): void {
@@ -73,7 +113,7 @@ struct CreateOrderPage {
       return;
     }
     if (!canCurrentUserJoinTrade(user)) {
-      showToastByContext(this, { message: '管理员账号不支持下单', duration: 1500 });
+      showToastByContext(this, { message: getTradeEntryDeniedMessage(user, 'order'), duration: 1500 });
       backByContext(this);
       return;
     }
@@ -82,13 +122,13 @@ struct CreateOrderPage {
       backByContext(this);
       return;
     }
-    if (!canUserTradeProduct(this.product, user.id, user.role)) {
+    if (!canUserTradeProduct(this.product, user.id, user.role, user.status)) {
       showToastByContext(this, { message: '\u5f53\u524d\u5546\u54c1\u6682\u4e0d\u53ef\u4e0b\u5355', duration: 1500 });
       backByContext(this);
     }
   }
 
-  private submit(): void {
+  private async submit(): Promise<void> {
     const user: User | null = appContext.getCurrentUser();
     if (!user) {
       showToastByContext(this, { message: '\u8bf7\u5148\u767b\u5f55', duration: 1500 });
@@ -96,7 +136,7 @@ struct CreateOrderPage {
       return;
     }
     if (!canCurrentUserJoinTrade(user)) {
-      showToastByContext(this, { message: '管理员账号不支持下单', duration: 1500 });
+      showToastByContext(this, { message: getTradeEntryDeniedMessage(user, 'order'), duration: 1500 });
       backByContext(this);
       return;
     }
@@ -109,13 +149,13 @@ struct CreateOrderPage {
       backByContext(this);
       return;
     }
-    if (!canUserTradeProduct(this.product, user.id, user.role)) {
+    if (!canUserTradeProduct(this.product, user.id, user.role, user.status)) {
       showToastByContext(this, { message: '\u5f53\u524d\u5546\u54c1\u6682\u4e0d\u53ef\u4e0b\u5355', duration: 1500 });
       backByContext(this);
       return;
     }
 
-    const result = appContext.order.createOrder(user.id, this.product.id, this.address);
+    const result = await appContext.order.createOrder(user.id, this.product.id, this.address);
     showToastByContext(this, { message: result.message, duration: 1600 });
 
     if (result.ok) {

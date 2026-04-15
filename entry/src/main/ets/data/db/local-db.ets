@@ -1,9 +1,25 @@
-import { Announcement, CartItem, ChatMessage, ChatThreadRecord, MessageNotification, Order, Product, Review, User } from '../../types/domain';
+import {
+  AppealRecord,
+  Announcement,
+  CartItem,
+  ChatMessage,
+  ChatThreadRecord,
+  GovernanceAction,
+  MessageNotification,
+  ModerationRecord,
+  Order,
+  Product,
+  Review,
+  User
+} from '../../types/domain';
 import { createMemoryPersistenceAdapter, PersistenceAdapter } from './persistence-adapter';
 import {
   clonePersistedLocalState,
   createSeedLocalState,
   LOCAL_DB_STORAGE_KEY,
+  normalizeAppealRecord,
+  normalizeGovernanceAction,
+  normalizeModerationRecord,
   normalizePersistedLocalState,
   PersistedLocalState
 } from './persisted-state';
@@ -19,6 +35,9 @@ export class LocalDb {
   private chatThreads: ChatThreadRecord[] = [];
   private chats: ChatMessage[] = [];
   private notifications: MessageNotification[] = [];
+  private moderationRecords: ModerationRecord[] = [];
+  private appealRecords: AppealRecord[] = [];
+  private governanceActions: GovernanceAction[] = [];
 
   constructor(persistence: PersistenceAdapter = createMemoryPersistenceAdapter()) {
     this.persistence = persistence;
@@ -63,6 +82,9 @@ export class LocalDb {
     this.chatThreads = normalizedState.chatThreads;
     this.chats = normalizedState.chats;
     this.notifications = normalizedState.notifications;
+    this.moderationRecords = normalizedState.moderationRecords;
+    this.appealRecords = normalizedState.appealRecords;
+    this.governanceActions = normalizedState.governanceActions;
   }
 
   private flush(): void {
@@ -76,7 +98,10 @@ export class LocalDb {
       announcements: this.clone(this.announcements),
       chatThreads: this.clone(this.chatThreads),
       chats: this.clone(this.chats),
-      notifications: this.clone(this.notifications)
+      notifications: this.clone(this.notifications),
+      moderationRecords: this.clone(this.moderationRecords),
+      appealRecords: this.clone(this.appealRecords),
+      governanceActions: this.clone(this.governanceActions)
     };
 
     try {
@@ -164,6 +189,33 @@ export class LocalDb {
 
   setNotifications(notifications: MessageNotification[]): void {
     this.notifications = this.clone(notifications);
+    this.flush();
+  }
+
+  getModerationRecords(): ModerationRecord[] {
+    return this.clone(this.moderationRecords);
+  }
+
+  setModerationRecords(records: ModerationRecord[]): void {
+    this.moderationRecords = records.map((record: ModerationRecord) => normalizeModerationRecord(record));
+    this.flush();
+  }
+
+  getAppealRecords(): AppealRecord[] {
+    return this.clone(this.appealRecords);
+  }
+
+  setAppealRecords(records: AppealRecord[]): void {
+    this.appealRecords = records.map((record: AppealRecord) => normalizeAppealRecord(record));
+    this.flush();
+  }
+
+  getGovernanceActions(): GovernanceAction[] {
+    return this.clone(this.governanceActions);
+  }
+
+  setGovernanceActions(records: GovernanceAction[]): void {
+    this.governanceActions = records.map((record: GovernanceAction) => normalizeGovernanceAction(record));
     this.flush();
   }
 }

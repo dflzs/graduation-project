@@ -3,11 +3,15 @@ import { productRepository } from '../repositories/product.repo';
 import { userRepository } from '../repositories/user.repo';
 import { CartItem, OperationResult, Product } from '../types/domain';
 import { newId } from '../utils/id';
-import { canCurrentUserJoinTrade, isProductOwnedByUser } from '../utils/trade-guard';
+import { canCurrentUserJoinTrade, getTradeAccessDeniedMessage, isProductOwnedByUser } from '../utils/trade-guard';
 import { syncService } from './sync.service.impl';
 
 export class CartServiceImpl {
   listByUser(userId: string): CartItem[] {
+    const user = userRepository.getById(userId);
+    if (!canCurrentUserJoinTrade(user)) {
+      return [];
+    }
     return cartRepository.listByUser(userId)
       .sort((a: CartItem, b: CartItem) => b.updatedAt - a.updatedAt);
   }
@@ -15,7 +19,10 @@ export class CartServiceImpl {
   addToCart(userId: string, productId: string, qty: number = 1): OperationResult<CartItem> {
     const user = userRepository.getById(userId);
     if (!canCurrentUserJoinTrade(user)) {
-      return { ok: false, message: '管理员账号不支持加入购物车' };
+      return {
+        ok: false,
+        message: getTradeAccessDeniedMessage(user, '管理员账号不支持加入购物车', '该账号已被停用，无法加入购物车')
+      };
     }
 
     const product: Product | null = productRepository.getById(productId);
@@ -51,11 +58,19 @@ export class CartServiceImpl {
   }
 
   removeItem(userId: string, itemId: string): void {
+    const user = userRepository.getById(userId);
+    if (!canCurrentUserJoinTrade(user)) {
+      return;
+    }
     cartRepository.remove(itemId);
     this.publishCart(userId);
   }
 
   clearByUser(userId: string): void {
+    const user = userRepository.getById(userId);
+    if (!canCurrentUserJoinTrade(user)) {
+      return;
+    }
     cartRepository.clearByUser(userId);
     this.publishCart(userId);
   }

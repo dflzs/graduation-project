@@ -156,7 +156,7 @@ async function loginByPassword(req, res) {
     }
 
     const user = rows[0];
-    if (user.status !== 'active') {
+    if (user.status === 'banned') {
       return res.status(403).json(fail('账号已被封禁。'));
     }
 

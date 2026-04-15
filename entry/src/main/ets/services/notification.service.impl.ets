@@ -106,7 +106,7 @@ export class NotificationServiceImpl implements NotificationService {
       sellerId,
       'product_approved',
       '商品审核通过',
-      `${productTitle} 已通过审核，现在已在首页公开展示。`,
+      `${productTitle} 已通过审核，现在已经在首页公开展示。`,
       productId
     );
   }

@@ -4,9 +4,16 @@ import { ChatThread, MessageNotification, NotificationType, User } from '../../t
 import { formatTime } from '../../utils/time';
 import { buildReminderRenderKey, buildThreadRenderKey } from '../../utils/render-keys';
 import {
+  buildMarketplaceUserSyncKeys,
   buildMessageHubAudiencePresentation,
   MessageHubAudiencePresentation
 } from '../../utils/marketplace-audience-ui';
+import {
+  buildMessageReminderTarget,
+  countVisibleMessageHubUnread,
+  filterMessageHubReminders,
+  MessageReminderTarget
+} from '../../utils/message-reminder-route';
 import { getMarketplaceAudienceMode, MarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
@@ -70,14 +77,25 @@ export struct MessageHubPage {
   @State private reminders: MessageNotification[] = [];
   @State private threads: ChatThread[] = [];
   private syncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
-    this.refresh();
+    void this.refresh();
     this.bindChanges();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
-    this.refresh();
+    void this.refresh();
+  }
+
+  aboutToDisappear(): void {
+    if (this.syncUnsubscriber) {
+      this.syncUnsubscriber();
+      this.syncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
   }
 
   private bindChanges(): void {
@@ -85,11 +103,22 @@ export struct MessageHubPage {
       return;
     }
     this.syncUnsubscriber = appContext.sync.subscribe('messages:changed', () => {
-      this.refresh();
+      void this.refresh();
     });
   }
 
-  private refresh(): void {
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.refresh();
+      })
+    );
+  }
+
+  private async refresh(): Promise<void> {
     this.currentUser = appContext.getCurrentUser();
     if (!this.currentUser) {
       this.reminders = [];
@@ -97,10 +126,11 @@ export struct MessageHubPage {
       return;
     }
 
-    this.reminders = appContext.notification
-      .listByUser(this.currentUser.id)
-      .sort((a: MessageNotification, b: MessageNotification) => b.createdAt - a.createdAt);
-    this.threads = appContext.chat.listThreads(this.currentUser.id);
+    this.reminders = filterMessageHubReminders(
+      this.currentUser,
+      appContext.notification.listByUser(this.currentUser.id)
+    ).sort((a: MessageNotification, b: MessageNotification) => b.createdAt - a.createdAt);
+    this.threads = await appContext.chat.listThreads(this.currentUser.id);
   }
 
   private audienceMode(): MarketplaceAudienceMode {
@@ -119,11 +149,15 @@ export struct MessageHubPage {
     }
     if (presentation.primaryAction === 'admin') {
       pushUrlByContext(this, { url: 'pages/Admin/AdminDashboardPage' });
+      return;
+    }
+    if (presentation.primaryAction === 'profile') {
+      pushUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
     }
   }
 
   private getReminderUnreadCount(): number {
-    return this.reminders.filter((item: MessageNotification) => !item.isRead).length;
+    return countVisibleMessageHubUnread(this.currentUser, this.reminders);
   }
 
   private markAllRemindersRead(): void {
@@ -133,10 +167,18 @@ export struct MessageHubPage {
     if (this.getReminderUnreadCount() === 0) {
       return;
     }
-    appContext.notification.markAllRead(this.currentUser.id);
-    this.refresh();
+    filterMessageHubReminders(this.currentUser, this.reminders)
+      .filter((item: MessageNotification) => !item.isRead)
+      .forEach((item: MessageNotification) => {
+        appContext.notification.markRead(item.id);
+      });
+    void this.refresh();
     showToastByContext(this, {
-      message: this.audienceMode() === 'admin' ? '后台提醒已全部设为已读' : '交易提醒已全部设为已读',
+      message: this.audienceMode() === 'admin'
+        ? '后台提醒已全部设为已读'
+        : this.audienceMode() === 'restricted'
+          ? '账号提醒已全部设为已读'
+          : '交易提醒已全部设为已读',
       duration: 1200
     });
   }
@@ -149,30 +191,13 @@ export struct MessageHubPage {
 
     if (!item.isRead) {
       appContext.notification.markRead(item.id);
-      this.refresh();
+      void this.refresh();
     }
 
-    if (item.type === 'product_submitted' || item.type === 'product_rejected') {
-      pushUrlByContext(this, { url: 'pages/Product/MyPublishedProductsPage' });
-      return;
-    }
-
-    if (item.type === 'product_approved') {
-      pushUrlByContext(this, {
-        url: 'pages/Product/ProductDetailPage',
-        params: {
-          productId: item.relatedId
-        }
-      });
-      return;
-    }
-
+    const target: MessageReminderTarget = buildMessageReminderTarget(item, this.currentUser);
     pushUrlByContext(this, {
-      url: 'pages/Order/OrderDetailPage',
-      params: {
-        orderId: item.relatedId,
-        source: 'message'
-      }
+      url: target.url,
+      params: target.params
     });
   }
 

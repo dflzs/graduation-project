@@ -8,20 +8,17 @@ import { syncService } from '../services/sync.service.impl';
 import { notificationService } from '../services/notification.service.impl';
 import { chatService } from '../services/chat.service.impl';
 import { campusService } from '../services/campus.service.impl';
+import { adminDashboardService } from '../services/admin-dashboard.service.impl';
+import { adminProductService } from '../services/admin-product.service.impl';
+import { adminUserService } from '../services/admin-user.service.impl';
+import { marketplaceProductService } from '../services/marketplace-product.service.impl';
+import { moderationService } from '../services/moderation.service.impl';
+import { appealService } from '../services/appeal.service.impl';
+import { governanceService } from '../services/governance.service.impl';
 import { canAccessAdmin } from '../services/guard.service';
-import { productRepository } from '../repositories/product.repo';
-import { userRepository } from '../repositories/user.repo';
-import { orderRepository } from '../repositories/order.repo';
 import { AuthSession, Product, User } from '../types/domain';
-
-export class DashboardStats {
-  userCount: number = 0;
-  bannedUserCount: number = 0;
-  productCount: number = 0;
-  pendingOrderCount: number = 0;
-  paidOrderCount: number = 0;
-  completedOrderCount: number = 0;
-}
+import { DashboardStats } from '../types/dashboard-stats';
+import { buildLocalDashboardStats } from '../utils/dashboard-stats';
 
 export class AppContext {
   readonly auth = authService;
@@ -34,6 +31,13 @@ export class AppContext {
   readonly notification = notificationService;
   readonly chat = chatService;
   readonly campus = campusService;
+  readonly adminDashboard = adminDashboardService;
+  readonly adminProducts = adminProductService;
+  readonly adminUsers = adminUserService;
+  readonly marketplaceProducts = marketplaceProductService;
+  readonly moderation = moderationService;
+  readonly appeal = appealService;
+  readonly governance = governanceService;
 
   getSession(): AuthSession | null {
     return this.auth.restoreSession();
@@ -60,17 +64,7 @@ export class AppContext {
   }
 
   getDashboardStats(): DashboardStats {
-    const users = userRepository.list();
-    const products = productRepository.list().filter((p: Product) => !p.isDeleted);
-    const orders = orderRepository.list();
-    const stats: DashboardStats = new DashboardStats();
-    stats.userCount = users.length;
-    stats.bannedUserCount = users.filter((u: User) => u.status === 'banned').length;
-    stats.productCount = products.length;
-    stats.pendingOrderCount = orders.filter((o) => o.status === 'PENDING_PAYMENT').length;
-    stats.paidOrderCount = orders.filter((o) => o.status === 'PAID_SIMULATED').length;
-    stats.completedOrderCount = orders.filter((o) => o.status === 'COMPLETED').length;
-    return stats;
+    return buildLocalDashboardStats();
   }
 }
 

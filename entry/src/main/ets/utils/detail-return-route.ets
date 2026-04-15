@@ -1,3 +1,5 @@
+import { User } from '../types/domain';
+
 export class DetailReturnParams {
   tab?: string;
 
@@ -26,6 +28,13 @@ export function buildOrderDetailReturnTarget(source: string): DetailReturnTarget
   }
 
   return null;
+}
+
+export function buildChatDetailReturnTarget(user: User | null): DetailReturnTarget {
+  if (!user) {
+    return new DetailReturnTarget('pages/Auth/LoginPage');
+  }
+  return new DetailReturnTarget('pages/Index', new DetailReturnParams('message'));
 }
 
 export function resolveIndexRouteTab(routeTab: string | undefined, fallbackTab: number): number {

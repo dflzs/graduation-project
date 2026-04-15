@@ -1,12 +1,11 @@
-﻿import { replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
+import { replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
-import { productRepository } from '../../repositories/product.repo';
-import { notificationService } from '../../services/notification.service.impl';
-import { remoteProductClient } from '../../services/product-remote.client';
+import { getAdminAccessDeniedMessage, getAdminActionDeniedMessage } from '../../services/guard.service';
 import { Product } from '../../types/domain';
+import { buildAdminGuardSyncKeys } from '../../utils/admin-dashboard-sync';
 import { buildProductRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
 import {
@@ -88,82 +87,104 @@ struct AdminProductsPage {
   @State products: Product[] = [];
   @State isLoading: boolean = false;
   @State errorText: string = '';
+  private productSyncUnsubscriber: (() => void) | null = null;
+  private adminGuardSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     void this.refresh();
+    this.bindProductSync();
+    this.bindAdminGuardSync();
   }
 
   onPageShow(): void {
     void this.refresh();
   }
 
+  aboutToDisappear(): void {
+    if (this.productSyncUnsubscriber) {
+      this.productSyncUnsubscriber();
+      this.productSyncUnsubscriber = null;
+    }
+    this.adminGuardSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.adminGuardSyncUnsubscribers = [];
+  }
+
+  private bindProductSync(): void {
+    if (this.productSyncUnsubscriber) {
+      return;
+    }
+    this.productSyncUnsubscriber = appContext.sync.subscribe('products:changed', () => {
+      void this.refresh();
+    });
+  }
+
+  private bindAdminGuardSync(): void {
+    if (this.adminGuardSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.adminGuardSyncUnsubscribers = buildAdminGuardSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.refresh();
+      })
+    );
+  }
+
   private async refresh(): Promise<void> {
     if (!appContext.isAdmin()) {
-      showToastByContext(this, { message: '仅管理员可访问', duration: 1500 });
+      showToastByContext(this, { message: getAdminAccessDeniedMessage(appContext.getCurrentUser()), duration: 1500 });
       replaceUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
       return;
     }
 
-    const session = appContext.getSession();
-    if (!session) {
-      replaceUrlByContext(this, { url: 'pages/Auth/LoginPage' });
-      return;
-    }
-
     this.isLoading = true;
-    const result = await remoteProductClient.listAdminProducts(session.token);
-    if (!result.ok || !result.data) {
-      this.products = productRepository.list()
-        .filter((item: Product) => !item.isDeleted)
-        .sort((a: Product, b: Product) => b.createdAt - a.createdAt);
+    const result = await appContext.adminProducts.listProducts();
+    if (!result.ok) {
+      this.products = [];
       this.errorText = result.message;
       this.isLoading = false;
       return;
     }
 
-    this.products = result.data.sort((a: Product, b: Product) => b.createdAt - a.createdAt);
-    this.products.forEach((item: Product) => productRepository.mergeRemote(item));
+    this.products = result.data ?? [];
     this.errorText = '';
     this.isLoading = false;
   }
 
   private async approve(productId: string): Promise<void> {
-    const session = appContext.getSession();
-    if (!session) {
+    const deniedMessage = getAdminActionDeniedMessage(appContext.getCurrentUser());
+    if (deniedMessage.length > 0) {
+      showToastByContext(this, { message: deniedMessage, duration: 1200 });
       return;
     }
-    const result = await remoteProductClient.approveProduct(session.token, productId);
+    const result = await appContext.adminProducts.approveProduct(productId);
     showToastByContext(this, { message: result.message, duration: 1200 });
-    if (result.ok && result.data) {
-      productRepository.mergeRemote(result.data);
-      notificationService.notifyProductApproved(result.data.sellerId, result.data.title, result.data.id);
+    if (result.ok) {
       void this.refresh();
     }
   }
 
   private async reject(productId: string): Promise<void> {
-    const session = appContext.getSession();
-    if (!session) {
+    const deniedMessage = getAdminActionDeniedMessage(appContext.getCurrentUser());
+    if (deniedMessage.length > 0) {
+      showToastByContext(this, { message: deniedMessage, duration: 1200 });
       return;
     }
-    const result = await remoteProductClient.rejectProduct(session.token, productId);
+    const result = await appContext.adminProducts.rejectProduct(productId);
     showToastByContext(this, { message: result.message, duration: 1200 });
-    if (result.ok && result.data) {
-      productRepository.mergeRemote(result.data);
-      notificationService.notifyProductRejected(result.data.sellerId, result.data.title, result.data.id);
+    if (result.ok) {
       void this.refresh();
     }
   }
 
   private async forceOffShelf(productId: string): Promise<void> {
-    const session = appContext.getSession();
-    if (!session) {
+    const deniedMessage = getAdminActionDeniedMessage(appContext.getCurrentUser());
+    if (deniedMessage.length > 0) {
+      showToastByContext(this, { message: deniedMessage, duration: 1200 });
       return;
     }
-    const result = await remoteProductClient.forceOffShelfProduct(session.token, productId);
+    const result = await appContext.adminProducts.forceOffShelfProduct(productId);
     showToastByContext(this, { message: result.message, duration: 1200 });
-    if (result.ok && result.data) {
-      productRepository.mergeRemote(result.data);
+    if (result.ok) {
       void this.refresh();
     }
   }

@@ -5,6 +5,7 @@ import {
   OperationResult,
   RegisterCodeVerification,
   User,
+  UserStatus,
   VerificationCodeDispatch
 } from '../types/domain';
 import {
@@ -24,6 +25,13 @@ import { HttpRemoteAuthClient } from './auth-remote.client';
 import { AuthStateService, authStateService } from './auth-state.service';
 
 const SESSION_TTL_MS: number = 7 * 24 * 3600 * 1000;
+
+function mapRemoteUserStatus(status: string | undefined): UserStatus {
+  if (status === 'restricted' || status === 'muted' || status === 'suspended' || status === 'banned') {
+    return status;
+  }
+  return 'active';
+}
 
 export class AuthServiceImpl implements AuthService {
   private session: AuthSession | null = null;
@@ -239,7 +247,7 @@ export class AuthServiceImpl implements AuthService {
     }
 
     const latestUser = userRepository.getById(this.session.currentUser.id);
-    if (!latestUser || latestUser.status !== 'active') {
+    if (!latestUser) {
       this.session = null;
       this.stateService.clear();
       return null;
@@ -310,7 +318,7 @@ export class AuthServiceImpl implements AuthService {
     }
 
     const currentUser = userRepository.getByPhone(remoteUser.phone || fallbackPhone);
-    if (currentUser && currentUser.status !== 'active') {
+    if (currentUser && (currentUser.status === 'banned' || currentUser.status === 'suspended')) {
       return { ok: false, message: '\u8be5\u8d26\u53f7\u5df2\u88ab\u505c\u7528\u3002' };
     }
 
@@ -384,7 +392,7 @@ export class AuthServiceImpl implements AuthService {
         nickname: remoteUser.nickname || `\u7528\u6237${phone.slice(-4)}`,
         avatar: remoteUser.avatar || '',
         role: remoteUser.role === 'admin' ? 'admin' : 'user',
-        status: remoteUser.status === 'banned' ? 'banned' : 'active',
+        status: mapRemoteUserStatus(remoteUser.status),
         creditScore: remoteUser.credit_score,
         schoolId: remoteUser.school_id,
         schoolName: remoteUser.school_name,
@@ -416,7 +424,7 @@ export class AuthServiceImpl implements AuthService {
       nickname: remoteUser.nickname || existingUser.nickname || `\u7528\u6237${phone.slice(-4)}`,
       avatar: remoteUser.avatar || existingUser.avatar || '',
       role: remoteUser.role === 'admin' ? 'admin' : existingUser.role,
-      status: remoteUser.status === 'banned' ? 'banned' : 'active',
+      status: mapRemoteUserStatus(remoteUser.status),
       creditScore: remoteUser.credit_score || existingUser.creditScore,
       schoolId: remoteUser.school_id ?? existingUser.schoolId,
       schoolName: remoteUser.school_name ?? existingUser.schoolName,

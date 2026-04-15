@@ -1,5 +1,5 @@
 export type UserRole = 'user' | 'admin';
-export type UserStatus = 'active' | 'banned';
+export type UserStatus = 'active' | 'restricted' | 'muted' | 'suspended' | 'banned';
 export type ProductStatus = 'pending_review' | 'on_sale' | 'locked' | 'sold' | 'off_shelf' | 'rejected';
 export type PayType = 'simulated';
 export type VerificationMethod =
@@ -7,6 +7,27 @@ export type VerificationMethod =
   | 'MANUAL_CAMPUS_CARD'
   | 'MANUAL_ENROLLMENT_PROOF'
   | 'FUTURE_SSO';
+export type ModerationTargetType = 'product_report' | 'user_report' | 'order_complaint' | 'chat_report';
+export type ModerationStatus =
+  | 'pending'
+  | 'triaging'
+  | 'awaiting_evidence'
+  | 'in_review'
+  | 'resolved_valid'
+  | 'resolved_rejected'
+  | 'resolved_partial'
+  | 'appealed'
+  | 'appeal_reviewing'
+  | 'closed';
+export type ModerationPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type AppealStatus = 'pending' | 'in_review' | 'accepted' | 'rejected' | 'closed';
+export type GovernanceSourceType = 'moderation' | 'manual_admin';
+export type GovernanceActionType =
+  | 'warning'
+  | 'mute_chat'
+  | 'restrict_trade'
+  | 'temporary_ban'
+  | 'permanent_ban';
 export type NotificationType =
   | 'product_submitted'
   | 'product_approved'
@@ -260,6 +281,82 @@ export interface MessageNotification {
   relatedId: string;
   isRead: boolean;
   createdAt: number;
+}
+
+export interface ModerationRecord {
+  id: string;
+  reporterId: string;
+  targetType: ModerationTargetType;
+  targetId: string;
+  reportedUserId?: string;
+  relatedOrderId?: string;
+  relatedProductId?: string;
+  relatedThreadId?: string;
+  category?: string;
+  reason: string;
+  description: string;
+  evidenceItems?: string[];
+  status: ModerationStatus;
+  priority?: ModerationPriority;
+  assignedAdminId?: string;
+  adminComment?: string;
+  resolutionCode?: string;
+  governanceActionId?: string;
+  reviewedBy?: string;
+  reviewedAt?: number;
+  closedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AppealRecord {
+  id: string;
+  moderationRecordId: string;
+  appellantId: string;
+  reason: string;
+  description: string;
+  evidenceItems: string[];
+  status: AppealStatus;
+  reviewedBy?: string;
+  reviewComment?: string;
+  reviewedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AppealEligibility {
+  moderationRecordId: string;
+  appellantId: string;
+  eligible: boolean;
+  reason: string;
+  existingAppealId?: string;
+}
+
+export interface GovernanceAction {
+  id: string;
+  userId: string;
+  sourceType: GovernanceSourceType;
+  sourceId: string;
+  actionType: GovernanceActionType;
+  reason: string;
+  comment?: string;
+  startAt: number;
+  endAt?: number;
+  active: boolean;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+  canceledAt?: number;
+  canceledBy?: string;
+}
+
+export interface GovernanceUserSummary {
+  userId: string;
+  activeActionTypes: GovernanceActionType[];
+  latestAction?: GovernanceAction;
+  totalActionCount: number;
+  openCaseCount: number;
+  latestActionAt?: number;
 }
 
 export interface AuthSession {

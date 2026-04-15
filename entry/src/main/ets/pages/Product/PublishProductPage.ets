@@ -2,9 +2,6 @@ import { fileIo } from '@kit.CoreFileKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { appContext } from '../../app/app-context';
 import { PRODUCT_CATEGORIES } from '../../constants/config';
-import { productRepository } from '../../repositories/product.repo';
-import { notificationService } from '../../services/notification.service.impl';
-import { remoteProductClient } from '../../services/product-remote.client';
 import { uploadRemoteClient } from '../../services/upload-remote.client';
 import { LocationGroup, TradeLocation, User } from '../../types/domain';
 import { RemoteCreateProductPayload } from '../../types/product-remote';
@@ -15,8 +12,10 @@ import {
   pickPreferredTradeLocation
 } from '../../utils/campus-location-ui';
 import { normalizeManualCoverUrl } from '../../utils/cover-image';
+import { resolvePublishEntryTarget } from '../../utils/publish-entry';
 import { getPublishChipBackground, getPublishChipBorder, getPublishChipText } from '../../utils/publish-chip';
 import { pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
 
 const COVER_PICKER_LIMIT: number = 1;
 const COVER_PREVIEW_HEIGHT: number = 180;
@@ -49,13 +48,52 @@ struct PublishProductPage {
   @State selectedTradeLocationId: string = '';
   @State locationHint: string = '\u8bf7\u5148\u5b8c\u5584\u6821\u56ed\u8d44\u6599\uff0c\u518d\u9009\u62e9\u53ef\u7528\u7684\u6821\u5185\u4ea4\u6613\u70b9\u3002';
   @State isCampusLocationLoading: boolean = false;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
+    this.bindUserSync();
+    if (!this.ensurePublishPermission()) {
+      return;
+    }
     void this.refreshCampusLocations();
   }
 
   onPageShow(): void {
+    if (!this.ensurePublishPermission()) {
+      return;
+    }
     void this.refreshCampusLocations();
+  }
+
+  aboutToDisappear(): void {
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        if (!this.ensurePublishPermission()) {
+          return;
+        }
+        void this.refreshCampusLocations();
+      })
+    );
+  }
+
+  private ensurePublishPermission(): boolean {
+    const target = resolvePublishEntryTarget(appContext.getCurrentUser());
+    if (target.url === 'pages/Product/PublishProductPage') {
+      return true;
+    }
+    if (target.promptMessage.length > 0) {
+      showToastByContext(this, { message: target.promptMessage, duration: 1500 });
+    }
+    replaceUrlByContext(this, { url: target.url });
+    return false;
   }
 
   private getSelectedLocationGroupName(): string {
@@ -178,6 +216,10 @@ struct PublishProductPage {
       return;
     }
 
+    if (!this.ensurePublishPermission()) {
+      return;
+    }
+
     const user: User | null = appContext.getCurrentUser();
     const session = appContext.getSession();
     if (!user || !session) {
@@ -224,8 +266,7 @@ struct PublishProductPage {
         coverImageUrl = normalizeManualCoverUrl(this.manualCoverUrl);
       }
 
-      const result = await remoteProductClient.createProduct(
-        session.token,
+      const result = await appContext.marketplaceProducts.createMarketplaceProduct(
         new RemoteCreateProductPayload(
           trimmedTitle,
           trimmedDesc,
@@ -237,13 +278,12 @@ struct PublishProductPage {
           this.campusId,
           selectedLocation.groupId,
           selectedLocation.id
-        )
+        ),
+        user.id
       );
 
       showToastByContext(this, { message: result.message, duration: 1500 });
       if (result.ok && result.data) {
-        productRepository.mergeRemote(result.data);
-        notificationService.notifyProductSubmitted(user.id, result.data.title, result.data.id);
         replaceUrlByContext(this, { url: 'pages/Product/MyPublishedProductsPage' });
       }
     } finally {

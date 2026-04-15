@@ -1,13 +1,22 @@
 import { backByContext, getParamsByContext, pushUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
-import { productRepository } from '../../repositories/product.repo';
 import { userRepository } from '../../repositories/user.repo';
-import { remoteProductClient } from '../../services/product-remote.client';
 import { Product, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
-import { canCurrentUserJoinTrade, canUserTradeProduct, isProductOwnedByUser } from '../../utils/trade-guard';
-import { canRequestRemoteProductDetail } from '../../utils/product-detail-source';
-import { buildPublicCampusTrustPresentation, CampusTrustPresentation } from '../../utils/campus-trust-ui';
+import {
+  canCurrentUserJoinTrade,
+  canShowProductDetailContactAction,
+  canUserTradeProduct,
+  getProductDetailTradeHint,
+  getTradeEntryDeniedMessage,
+  isProductOwnedByUser
+} from '../../utils/trade-guard';
+import {
+  buildCampusTrustTonePalette,
+  buildPublicCampusTrustPresentation,
+  CampusTrustPresentation
+} from '../../utils/campus-trust-ui';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
 
 const PRODUCT_PARAM_INVALID_TEXT: string = '\u5546\u54c1\u53c2\u6570\u65e0\u6548';
 const PRODUCT_LOAD_FAILED_TEXT: string = '\u5546\u54c1\u4e0d\u5b58\u5728\u6216\u52a0\u8f7d\u5931\u8d25';
@@ -168,15 +177,48 @@ struct ProductDetailPage {
   @State product: Product | null = null;
   @State isLoading: boolean = false;
   @State errorText: string = '';
+  private productSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     const params = getParamsByContext<Record<string, string>>(this);
     this.productId = params?.productId ?? '';
     void this.loadProduct();
+    this.bindProductSync();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
     void this.loadProduct();
+  }
+
+  aboutToDisappear(): void {
+    if (this.productSyncUnsubscriber) {
+      this.productSyncUnsubscriber();
+      this.productSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindProductSync(): void {
+    if (this.productSyncUnsubscriber) {
+      return;
+    }
+    this.productSyncUnsubscriber = appContext.sync.subscribe('products:changed', () => {
+      void this.loadProduct();
+    });
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.loadProduct();
+      })
+    );
   }
 
   private async loadProduct(): Promise<void> {
@@ -186,40 +228,22 @@ struct ProductDetailPage {
       return;
     }
 
-    const localProduct: Product | null = productRepository.getById(this.productId);
-    if (localProduct) {
-      this.product = localProduct;
-      this.errorText = '';
-    }
-
-    if (!canRequestRemoteProductDetail(this.productId)) {
-      if (!localProduct) {
-        this.product = null;
-        this.errorText = PRODUCT_LOAD_FAILED_TEXT;
-      }
-      return;
-    }
-
     this.isLoading = true;
     try {
-      const result = await remoteProductClient.getProductDetail(this.productId);
+      const result = await appContext.marketplaceProducts.getProductDetail(this.productId);
       if (!result.ok || !result.data) {
-        if (!localProduct) {
-          this.product = null;
-          this.errorText = result.message || PRODUCT_LOAD_FAILED_TEXT;
-          showToastByContext(this, { message: this.errorText, duration: 1800 });
-        }
+        this.product = null;
+        this.errorText = result.message || PRODUCT_LOAD_FAILED_TEXT;
+        showToastByContext(this, { message: this.errorText, duration: 1800 });
         return;
       }
 
-      this.product = productRepository.mergeRemote(result.data);
+      this.product = result.data;
       this.errorText = '';
     } catch (error) {
-      if (!localProduct) {
-        this.product = null;
-        this.errorText = PRODUCT_LOAD_FAILED_TEXT;
-        showToastByContext(this, { message: this.errorText, duration: 1800 });
-      }
+      this.product = null;
+      this.errorText = PRODUCT_LOAD_FAILED_TEXT;
+      showToastByContext(this, { message: this.errorText, duration: 1800 });
     } finally {
       this.isLoading = false;
     }
@@ -233,7 +257,7 @@ struct ProductDetailPage {
       return;
     }
     if (!canCurrentUserJoinTrade(user)) {
-      showToastByContext(this, { message: '管理员账号不支持加入购物车', duration: 1500 });
+      showToastByContext(this, { message: getTradeEntryDeniedMessage(user, 'cart'), duration: 1500 });
       return;
     }
 
@@ -249,7 +273,7 @@ struct ProductDetailPage {
       return;
     }
 
-    if (!canUserTradeProduct(this.product, user.id, user.role)) {
+    if (!canUserTradeProduct(this.product, user.id, user.role, user.status)) {
       showToastByContext(this, {
         message: '\u5f53\u524d\u5546\u54c1\u4e0d\u53ef\u52a0\u5165\u8d2d\u7269\u8f66',
         duration: 1500
@@ -269,7 +293,7 @@ struct ProductDetailPage {
       return;
     }
     if (!canCurrentUserJoinTrade(currentUser)) {
-      showToastByContext(this, { message: '管理员账号不支持下单', duration: 1500 });
+      showToastByContext(this, { message: getTradeEntryDeniedMessage(currentUser, 'order'), duration: 1500 });
       return;
     }
     if (!this.product) {
@@ -282,7 +306,7 @@ struct ProductDetailPage {
       });
       return;
     }
-    if (!canUserTradeProduct(this.product, currentUser.id, currentUser.role)) {
+    if (!canUserTradeProduct(this.product, currentUser.id, currentUser.role, currentUser.status)) {
       showToastByContext(this, {
         message: '\u5f53\u524d\u5546\u54c1\u4e0d\u53ef\u4e0b\u5355',
         duration: 1500
@@ -302,10 +326,10 @@ struct ProductDetailPage {
 
   private canCurrentUserTrade(product: Product): boolean {
     const currentUser = appContext.getCurrentUser();
-    return canUserTradeProduct(product, currentUser?.id ?? '', currentUser?.role);
+    return canUserTradeProduct(product, currentUser?.id ?? '', currentUser?.role, currentUser?.status ?? 'active');
   }
 
-  private contactSeller(): void {
+  private async contactSeller(): Promise<void> {
     const currentUser: User | null = appContext.getCurrentUser();
     if (!currentUser) {
       showToastByContext(this, { message: '\u8bf7\u5148\u767b\u5f55', duration: 1500 });
@@ -313,7 +337,7 @@ struct ProductDetailPage {
       return;
     }
     if (!canCurrentUserJoinTrade(currentUser)) {
-      showToastByContext(this, { message: '管理员账号不支持发起商品沟通', duration: 1500 });
+      showToastByContext(this, { message: getTradeEntryDeniedMessage(currentUser, 'chat'), duration: 1500 });
       return;
     }
 
@@ -326,7 +350,7 @@ struct ProductDetailPage {
       return;
     }
 
-    const threadResult = appContext.chat.openProductThread(this.product.id, currentUser.id, this.product.sellerId);
+    const threadResult = await appContext.chat.openProductThread(this.product.id, currentUser.id, this.product.sellerId);
     if (!threadResult.ok || !threadResult.data) {
       showToastByContext(this, { message: threadResult.message, duration: 1500 });
       return;
@@ -338,9 +362,65 @@ struct ProductDetailPage {
     });
   }
 
+  private canCurrentUserSubmitModeration(product: Product): boolean {
+    const currentUser = appContext.getCurrentUser();
+    return currentUser !== null
+      && canCurrentUserJoinTrade(currentUser)
+      && currentUser.id !== product.sellerId;
+  }
+
+  private openProductReportPage(): void {
+    if (!this.product || !this.canCurrentUserSubmitModeration(this.product)) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Moderation/SubmitModerationPage',
+      params: {
+        targetType: 'product_report',
+        targetId: this.product.id,
+        title: this.product.title
+      }
+    });
+  }
+
+  private openSellerReportPage(): void {
+    if (!this.product || !this.canCurrentUserSubmitModeration(this.product)) {
+      return;
+    }
+    const sellerNickname = userRepository.getById(this.product.sellerId)?.nickname ?? '当前卖家';
+    pushUrlByContext(this, {
+      url: 'pages/Moderation/SubmitModerationPage',
+      params: {
+        targetType: 'user_report',
+        targetId: this.product.sellerId,
+        title: sellerNickname
+      }
+    });
+  }
+
   private getSellerTrustPresentation(): CampusTrustPresentation {
     const seller = this.product ? userRepository.getById(this.product.sellerId) : null;
     return buildPublicCampusTrustPresentation(seller);
+  }
+
+  private getSellerTrustCardBackground(): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation().tone).surfaceBackgroundColor;
+  }
+
+  private getSellerTrustRiskTextColor(): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation().tone).riskBadgeTextColor;
+  }
+
+  private getSellerTrustRiskBackground(): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation().tone).riskBadgeBackgroundColor;
+  }
+
+  private getSellerTrustTagTextColor(): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation().tone).tagTextColor;
+  }
+
+  private getSellerTrustTagBackground(): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation().tone).tagBackgroundColor;
   }
 
   @Builder
@@ -396,21 +476,80 @@ struct ProductDetailPage {
       }
       .width('100%')
 
-      Text(this.getSellerTrustPresentation().summary)
+      Row({ space: 8 }) {
+        Text(this.getSellerTrustPresentation().summary)
+          .layoutWeight(1)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(TITLE_COLOR)
+
+        Text(this.getSellerTrustPresentation().riskLabel)
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.getSellerTrustRiskTextColor())
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.getSellerTrustRiskBackground())
+          .borderRadius(12)
+      }
+      .width('100%')
+
+      if (this.getSellerTrustPresentation().trustTags.length > 0) {
+        Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row }) {
+          ForEach(this.getSellerTrustPresentation().trustTags, (tag: string) => {
+            Text(tag)
+              .fontSize(11)
+              .fontColor(this.getSellerTrustTagTextColor())
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .backgroundColor(this.getSellerTrustTagBackground())
+              .borderRadius(12)
+              .margin({ right: 8, bottom: 8 })
+          }, (tag: string) => tag)
+        }
         .width('100%')
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(TITLE_COLOR)
+      }
 
       Text(this.getSellerTrustPresentation().helperText)
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
         .fontColor(SUB_TEXT_COLOR)
+
+      Text(this.getSellerTrustPresentation().riskText)
+        .width('100%')
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor('#8C867F')
+
+      if (this.product && this.canCurrentUserSubmitModeration(this.product)) {
+        Row({ space: 10 }) {
+          Button('举报商品')
+            .layoutWeight(1)
+            .height(40)
+            .type(ButtonType.Normal)
+            .fontSize(13)
+            .fontColor('#A86B00')
+            .backgroundColor('#FFF6E6')
+            .border({ width: 1, color: '#E8D8B6' })
+            .borderRadius(14)
+            .onClick(() => this.openProductReportPage())
+
+          Button('举报卖家')
+            .layoutWeight(1)
+            .height(40)
+            .type(ButtonType.Normal)
+            .fontSize(13)
+            .fontColor('#A86B00')
+            .backgroundColor('#FFF6E6')
+            .border({ width: 1, color: '#E8D8B6' })
+            .borderRadius(14)
+            .onClick(() => this.openSellerReportPage())
+        }
+        .width('100%')
+      }
     }
     .width('100%')
     .padding(18)
-    .backgroundColor(CARD_BACKGROUND)
+    .backgroundColor(this.getSellerTrustCardBackground())
     .borderRadius(22)
   }
 
@@ -569,7 +708,7 @@ struct ProductDetailPage {
 
           Text(isProductOwnedByUser(product, appContext.getCurrentUser()?.id ?? '')
             ? getSelfOwnedHintText()
-            : getStatusHintText(product.status))
+            : getProductDetailTradeHint(product, appContext.getCurrentUser()))
             .width('100%')
             .fontSize(14)
             .fontColor(SUB_TEXT_COLOR)
@@ -636,14 +775,16 @@ struct ProductDetailPage {
           this.buildInfoRow('\u9762\u4ea4\u5730\u70b9', product.locationTag)
           this.buildInfoRow('\u53d1\u5e03\u65f6\u95f4', formatTime(product.createdAt))
 
-          if (appContext.getCurrentUser()?.id !== product.sellerId) {
+          if (canShowProductDetailContactAction(product, appContext.getCurrentUser())) {
             Button('\u8054\u7cfb\u5356\u5bb6')
               .width('100%')
               .height(44)
               .type(ButtonType.Normal)
               .backgroundColor('#E8F0FF')
               .fontColor('#2F6BFF')
-              .onClick(() => this.contactSeller())
+                  .onClick(() => {
+                    void this.contactSeller();
+                  })
           }
         }
         .width('100%')

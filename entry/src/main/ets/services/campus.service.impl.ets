@@ -29,8 +29,10 @@ import {
 } from '../types/campus-remote';
 import { userRepository } from '../repositories/user.repo';
 import { authStateService, AuthStateService } from './auth-state.service';
+import { getAdminAccessDeniedMessage, getAdminActionDeniedMessage } from './guard.service';
 import { HttpRemoteCampusClient, RemoteCampusClient } from './campus-remote.client';
 import { resolveDisplayedVerificationStatus } from '../utils/campus-verification-lifecycle-ui';
+import { syncService } from './sync.service.impl';
 
 class CampusSessionData {
   token: string;
@@ -43,7 +45,29 @@ class CampusSessionData {
 }
 
 function canManageCampusIdentity(user: User): boolean {
+  return user.role === 'user' && user.status === 'active';
+}
+
+function canAdministerCampusVerification(user: User): boolean {
+  return user.role === 'admin' && user.status === 'active';
+}
+
+function canViewCampusIdentity(user: User): boolean {
   return user.role === 'user';
+}
+
+function getCampusIdentityWriteDeniedMessage(user: User): string {
+  if (user.status !== 'active') {
+    return '该账号已被停用，无法修改校园身份资料';
+  }
+  return '当前账号类型不支持维护校园身份资料';
+}
+
+function getVerificationSubmitDeniedMessage(user: User): string {
+  if (user.status !== 'active') {
+    return '该账号已被停用，无法提交学生身份认证';
+  }
+  return '当前账号类型不支持提交学生身份认证';
 }
 
 function parseTimestamp(value: string | number | undefined): number | undefined {
@@ -211,6 +235,7 @@ function hasExistingCampusIdentity(user: User): boolean {
 function mergeUserVerificationFromRecord(existingUser: User, verification: StudentVerification): User {
   const mergedUser = cloneUser(existingUser);
   mergedUser.schoolId = verification.schoolId || existingUser.schoolId;
+  mergedUser.schoolName = verification.schoolName || existingUser.schoolName;
   mergedUser.campusId = verification.campusId || existingUser.campusId;
   mergedUser.campusName = verification.campusName || existingUser.campusName;
   mergedUser.studentNo = verification.studentNo || existingUser.studentNo;
@@ -344,7 +369,7 @@ export class CampusServiceImpl implements CampusService {
     }
 
     const current = sessionUser.data!;
-    if (!canManageCampusIdentity(current.user)) {
+    if (!canViewCampusIdentity(current.user)) {
       return { ok: false, message: '\u5f53\u524d\u8d26\u53f7\u7c7b\u578b\u4e0d\u652f\u6301\u67e5\u770b\u6821\u56ed\u8eab\u4efd\u8d44\u6599' };
     }
     const result = await this.remoteClient.getCurrentCampusProfile(current.token);
@@ -381,7 +406,7 @@ export class CampusServiceImpl implements CampusService {
     }
     const current = sessionUser.data;
     if (!canManageCampusIdentity(current.user)) {
-      return { ok: false, message: '当前账号类型不支持维护校园身份资料' };
+      return { ok: false, message: getCampusIdentityWriteDeniedMessage(current.user) };
     }
 
     const result = await this.remoteClient.updateCampusProfile(
@@ -417,7 +442,7 @@ export class CampusServiceImpl implements CampusService {
     }
 
     const current = sessionUser.data!;
-    if (!canManageCampusIdentity(current.user)) {
+    if (!canViewCampusIdentity(current.user)) {
       return { ok: false, message: '\u5f53\u524d\u8d26\u53f7\u7c7b\u578b\u4e0d\u652f\u6301\u67e5\u770b\u5b66\u751f\u8eab\u4efd\u8ba4\u8bc1' };
     }
     const result = await this.remoteClient.getCurrentVerification(current.token);
@@ -451,7 +476,7 @@ export class CampusServiceImpl implements CampusService {
     }
     const current = sessionUser.data!;
     if (!canManageCampusIdentity(current.user)) {
-      return { ok: false, message: '当前账号类型不支持提交学生身份认证' };
+      return { ok: false, message: getVerificationSubmitDeniedMessage(current.user) };
     }
 
     const result = await this.remoteClient.submitVerification(
@@ -502,6 +527,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminAccessDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.listVerificationApplications(current.token, status);
     if (!result.ok) {
@@ -526,6 +554,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminActionDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.reviewVerification(
       current.token,
@@ -537,10 +568,21 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: result.message || result.data?.message || '审核认证失败' };
     }
 
+    const verification = mapRemoteVerification(result.data.data);
+    const applicant = userRepository.getById(verification.userId);
+    if (applicant) {
+      userRepository.save(mergeUserVerificationFromRecord(applicant, verification));
+    }
+    syncService.publish({
+      key: 'admin:verification-changed',
+      value: verification.id,
+      updatedAt: Date.now()
+    });
+
     return {
       ok: true,
       message: result.data.message,
-      data: mapRemoteVerification(result.data.data)
+      data: verification
     };
   }
 
@@ -550,6 +592,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminActionDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.upsertSchool(
       current.token,
@@ -581,6 +626,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminActionDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.upsertCampus(
       current.token,
@@ -611,6 +659,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminActionDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.upsertLocationGroup(
       current.token,
@@ -642,6 +693,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminActionDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.upsertTradeLocation(
       current.token,
@@ -678,6 +732,9 @@ export class CampusServiceImpl implements CampusService {
       return { ok: false, message: sessionUser.message };
     }
     const current = sessionUser.data!;
+    if (!canAdministerCampusVerification(current.user)) {
+      return { ok: false, message: getAdminActionDeniedMessage(current.user) };
+    }
 
     const result = await this.remoteClient.updateTradeLocationStatus(current.token, locationId, isEnabled);
     if (!result.ok || !result.data?.data) {

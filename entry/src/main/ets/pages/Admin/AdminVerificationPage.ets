@@ -3,6 +3,7 @@ import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
+import { getAdminAccessDeniedMessage, getAdminActionDeniedMessage } from '../../services/guard.service';
 import { StudentVerification, VerificationStatus } from '../../types/domain';
 import { formatTime } from '../../utils/time';
 import {
@@ -17,6 +18,7 @@ import {
   getPolishDangerButtonTone,
   getPolishPrimaryButtonTone
 } from '../../utils/ui-polish-tokens';
+import { buildAdminGuardSyncKeys } from '../../utils/admin-dashboard-sync';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const SURFACE_BACKGROUND: string = '#FFFDFC';
@@ -110,13 +112,31 @@ struct AdminVerificationPage {
   @State schoolNameCache: NameCacheEntry[] = [];
   @State campusNameCache: NameCacheEntry[] = [];
   private isRefreshing: boolean = false;
+  private adminGuardSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     void this.refresh();
+    this.bindAdminGuardSync();
   }
 
   onPageShow(): void {
     void this.refresh();
+  }
+
+  aboutToDisappear(): void {
+    this.adminGuardSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.adminGuardSyncUnsubscribers = [];
+  }
+
+  private bindAdminGuardSync(): void {
+    if (this.adminGuardSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.adminGuardSyncUnsubscribers = buildAdminGuardSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        void this.refresh();
+      })
+    );
   }
 
   private async refresh(): Promise<void> {
@@ -125,7 +145,7 @@ struct AdminVerificationPage {
     }
 
     if (!appContext.isAdmin()) {
-      showToastByContext(this, { message: '仅管理员可访问', duration: 1500 });
+      showToastByContext(this, { message: getAdminAccessDeniedMessage(appContext.getCurrentUser()), duration: 1500 });
       replaceUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
       return;
     }
@@ -364,6 +384,11 @@ struct AdminVerificationPage {
   }
 
   private async approveSelected(): Promise<void> {
+    const deniedMessage = getAdminActionDeniedMessage(appContext.getCurrentUser());
+    if (deniedMessage.length > 0) {
+      showToastByContext(this, { message: deniedMessage, duration: 1200 });
+      return;
+    }
     const selected = this.getSelectedVerification();
     if (!selected) {
       showToastByContext(this, { message: '请先选择一条申请', duration: 1200 });
@@ -385,6 +410,11 @@ struct AdminVerificationPage {
   }
 
   private async rejectSelected(): Promise<void> {
+    const deniedMessage = getAdminActionDeniedMessage(appContext.getCurrentUser());
+    if (deniedMessage.length > 0) {
+      showToastByContext(this, { message: deniedMessage, duration: 1200 });
+      return;
+    }
     const selected = this.getSelectedVerification();
     if (!selected) {
       showToastByContext(this, { message: '请先选择一条申请', duration: 1200 });

@@ -7,7 +7,13 @@ import { uploadRemoteClient } from '../services/upload-remote.client';
 import { normalizeManualCoverUrl } from '../utils/cover-image';
 import { resolveIndexRouteTab } from '../utils/detail-return-route';
 import { openPublishEntry } from '../utils/publish-entry';
-import { shouldShowMarketplaceUnreadBadge } from '../utils/marketplace-audience-ui';
+import {
+  buildMarketplaceUserSyncKeys,
+  buildMineTabAudiencePresentation,
+  MineTabAudiencePresentation,
+  shouldShowMarketplaceUnreadBadge
+} from '../utils/marketplace-audience-ui';
+import { countVisibleMessageHubUnread } from '../utils/message-reminder-route';
 import { MessageHubPage } from './Chat/MessageHubPage';
 import { HomePage } from './Home/HomePage';
 import { User } from '../types/domain';
@@ -32,12 +38,14 @@ struct Index {
   @State isSavingAvatar: boolean = false;
   private shellNavigationUnsubscriber: (() => void) | null = null;
   private messageHubUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     this.applyRouteParams();
     this.refresh();
     this.bindShellNavigation();
     this.bindMessageHub();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
@@ -54,11 +62,13 @@ struct Index {
       this.messageHubUnsubscriber();
       this.messageHubUnsubscriber = null;
     }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
   }
 
   private refresh(): void {
     this.currentUser = appContext.getCurrentUser();
-    this.refreshMessageUnreadCount();
+    void this.refreshMessageUnreadCount();
     if (this.avatarLocalPath.length === 0 && this.avatarManualUrl.length === 0) {
       this.avatarPreviewUri = this.currentUser?.avatar ?? '';
     }
@@ -85,11 +95,22 @@ struct Index {
       return;
     }
     this.messageHubUnsubscriber = appContext.sync.subscribe('messages:changed', () => {
-      this.refreshMessageUnreadCount();
+      void this.refreshMessageUnreadCount();
     });
   }
 
-  private refreshMessageUnreadCount(): void {
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.refresh();
+      })
+    );
+  }
+
+  private async refreshMessageUnreadCount(): Promise<void> {
     if (!this.currentUser) {
       this.messageUnreadCount = 0;
       return;
@@ -98,8 +119,11 @@ struct Index {
       this.messageUnreadCount = 0;
       return;
     }
-    this.messageUnreadCount = appContext.notification.countUnread(this.currentUser.id)
-      + appContext.chat.countUnread(this.currentUser.id);
+    this.messageUnreadCount = countVisibleMessageHubUnread(
+      this.currentUser,
+      appContext.notification.listByUser(this.currentUser.id)
+    )
+      + await appContext.chat.countUnread(this.currentUser.id);
   }
 
   private buildMineAvatarText(): string {
@@ -123,6 +147,10 @@ struct Index {
     return this.currentUser.status === 'active'
       ? '\u8d26\u53f7\u72b6\u6001\u6b63\u5e38'
       : '\u8d26\u53f7\u5f53\u524d\u53d7\u9650';
+  }
+
+  private mineTabAudiencePresentation(): MineTabAudiencePresentation {
+    return buildMineTabAudiencePresentation(this.currentUser);
   }
 
   private currentAvatarDisplayUri(): string {
@@ -560,7 +588,7 @@ struct Index {
           .border({ width: 1, color: CARD_BORDER })
           .onClick(() => pushUrlByContext(this, { url: 'pages/Profile/ProfilePage' }))
 
-          if (appContext.isAdmin()) {
+          if (this.mineTabAudiencePresentation().showAdminSection) {
             Column({ space: 10 }) {
               this.buildMineSectionTitle('\u5e73\u53f0\u7ba1\u7406', '\u7ba1\u7406\u5458\u5165\u53e3\u653e\u5728\u8fd9\u91cc\uff0c\u65b9\u4fbf\u7edf\u4e00\u5904\u7406\u540e\u53f0\u4e8b\u52a1\u3002')
               this.buildMineActionRow('\u540e\u53f0\u7ba1\u7406', '\u67e5\u770b\u5e73\u53f0\u6982\u89c8\u3001\u5546\u54c1\u5ba1\u6838\u3001\u7528\u6237\u6cbb\u7406\u548c\u516c\u544a\u7ef4\u62a4\u3002', 'pages/Admin/AdminDashboardPage', '\u8fdb\u5165')
@@ -568,18 +596,22 @@ struct Index {
             }
             .width('100%')
           } else {
-            Column({ space: 10 }) {
-              this.buildMineSectionTitle('\u6211\u7684\u4ea4\u6613', '\u5e38\u7528\u4ea4\u6613\u5165\u53e3\u4f1a\u96c6\u4e2d\u5728\u8fd9\u91cc\uff0c\u65b9\u4fbf\u5feb\u901f\u7ee7\u7eed\u5904\u7406\u3002')
-              this.buildMineActionRow('\u6211\u7684\u8ba2\u5355', '\u67e5\u770b\u4e0b\u5355\u8bb0\u5f55\u3001\u9762\u4ea4\u72b6\u6001\u548c\u4ea4\u6613\u5b8c\u6210\u60c5\u51b5\u3002', 'pages/Order/OrderListPage', '\u8fdb\u5165')
-              this.buildMineActionRow('\u6211\u53d1\u5e03\u7684', '\u67e5\u770b\u5df2\u53d1\u5e03\u5546\u54c1\u3001\u5ba1\u6838\u72b6\u6001\u548c\u5728\u552e\u60c5\u51b5\u3002', 'pages/Product/MyPublishedProductsPage', '\u8fdb\u5165')
+            if (this.mineTabAudiencePresentation().showTradeSection) {
+              Column({ space: 10 }) {
+                this.buildMineSectionTitle('\u6211\u7684\u4ea4\u6613', this.mineTabAudiencePresentation().tradeSectionDescription)
+                this.buildMineActionRow('\u6211\u7684\u8ba2\u5355', '\u67e5\u770b\u4e0b\u5355\u8bb0\u5f55\u3001\u9762\u4ea4\u72b6\u6001\u548c\u4ea4\u6613\u5b8c\u6210\u60c5\u51b5\u3002', 'pages/Order/OrderListPage', '\u8fdb\u5165')
+                this.buildMineActionRow('\u6211\u53d1\u5e03\u7684', '\u67e5\u770b\u5df2\u53d1\u5e03\u5546\u54c1\u3001\u5ba1\u6838\u72b6\u6001\u548c\u5728\u552e\u60c5\u51b5\u3002', 'pages/Product/MyPublishedProductsPage', '\u8fdb\u5165')
+              }
+              .width('100%')
             }
-            .width('100%')
 
-            Column({ space: 10 }) {
-              this.buildMineSectionTitle('\u5e73\u53f0\u4e0e\u8d26\u53f7', '\u5e73\u53f0\u516c\u544a\u548c\u8d26\u53f7\u64cd\u4f5c\u7edf\u4e00\u653e\u5728\u8fd9\u4e2a\u533a\u57df\u3002')
-              this.buildMineActionRow('\u516c\u544a\u5386\u53f2', '\u67e5\u770b\u5e73\u53f0\u516c\u544a\u3001\u89c4\u5219\u63d0\u9192\u548c\u6d3b\u52a8\u901a\u77e5\u3002', 'pages/Announcement/AnnouncementPage', '\u67e5\u770b')
+            if (this.mineTabAudiencePresentation().showPlatformSection) {
+              Column({ space: 10 }) {
+                this.buildMineSectionTitle('\u5e73\u53f0\u4e0e\u8d26\u53f7', this.mineTabAudiencePresentation().platformSectionDescription)
+                this.buildMineActionRow('\u516c\u544a\u5386\u53f2', '\u67e5\u770b\u5e73\u53f0\u516c\u544a\u3001\u89c4\u5219\u63d0\u9192\u548c\u6d3b\u52a8\u901a\u77e5\u3002', 'pages/Announcement/AnnouncementPage', '\u67e5\u770b')
+              }
+              .width('100%')
             }
-            .width('100%')
           }
 
           Button('\u9000\u51fa\u767b\u5f55')

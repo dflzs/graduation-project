@@ -5,8 +5,15 @@ import { ORDER_STATUS_TEXT } from '../../constants/config';
 import { orderRepository } from '../../repositories/order.repo';
 import { productRepository } from '../../repositories/product.repo';
 import { Order, OrderStatus, Product, User } from '../../types/domain';
+import {
+  buildMarketplaceUserSyncKeys,
+  buildOrderListAudiencePresentation,
+  MarketplacePrimaryAction,
+  OrderListAudiencePresentation
+} from '../../utils/marketplace-audience-ui';
 import { buildOrderRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
+import { canViewTradeHistory, getMarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -17,8 +24,10 @@ const SUB_TEXT_COLOR: string = '#7B756E';
 @Entry
 @Component
 struct OrderListPage {
+  @State currentUser: User | null = null;
   @State orders: Order[] = [];
   private orderSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   onPageShow(): void {
     this.refresh();
@@ -27,6 +36,16 @@ struct OrderListPage {
   aboutToAppear(): void {
     this.refresh();
     this.bindOrderChanges();
+    this.bindUserSync();
+  }
+
+  aboutToDisappear(): void {
+    if (this.orderSyncUnsubscriber) {
+      this.orderSyncUnsubscriber();
+      this.orderSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
   }
 
   private bindOrderChanges(): void {
@@ -38,13 +57,47 @@ struct OrderListPage {
     });
   }
 
-  private refresh(): void {
-    const user: User | null = appContext.getCurrentUser();
-    if (!user) {
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.refresh();
+      })
+    );
+  }
+
+  private async refresh(): Promise<void> {
+    this.currentUser = appContext.getCurrentUser();
+    const currentUser: User | null = this.currentUser;
+    if (!canViewTradeHistory(currentUser) || !currentUser) {
       this.orders = [];
       return;
     }
-    this.orders = orderRepository.listByUser(user.id);
+    const result = await appContext.order.listMyOrders(currentUser.id);
+    this.orders = result.data ?? orderRepository.listByUser(currentUser.id);
+  }
+
+  private audiencePresentation(): OrderListAudiencePresentation {
+    return buildOrderListAudiencePresentation(getMarketplaceAudienceMode(this.currentUser));
+  }
+
+  private openAudiencePrimaryAction(): void {
+    const action: MarketplacePrimaryAction = this.audiencePresentation().primaryAction;
+    if (action === 'login') {
+      replaceUrlByContext(this, { url: 'pages/Auth/LoginPage' });
+      return;
+    }
+    if (action === 'profile') {
+      pushUrlByContext(this, { url: 'pages/Profile/ProfilePage' });
+      return;
+    }
+    if (action === 'admin') {
+      pushUrlByContext(this, { url: 'pages/Admin/AdminDashboardPage' });
+      return;
+    }
+    replaceUrlByContext(this, { url: 'pages/Index' });
   }
 
   private titleByOrder(order: Order): string {
@@ -129,7 +182,7 @@ struct OrderListPage {
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text('这里会集中展示每一笔交易的状态、金额和后续操作。')
+      Text(this.audiencePresentation().headerDescription)
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
@@ -143,17 +196,17 @@ struct OrderListPage {
   private buildEmptyState(): void {
     Column({ space: 12 }) {
       EmptyState({
-        title: '还没有订单记录',
-        description: '完成下单后，交易进度、面交信息和后续操作都会在这里集中展示。'
+        title: this.audiencePresentation().emptyTitle,
+        description: this.audiencePresentation().emptyDescription
       })
 
-      Button('去逛逛商品')
+      Button(this.audiencePresentation().emptyPrimaryActionLabel)
         .height(42)
         .type(ButtonType.Normal)
         .fontColor('#2F6BFF')
         .backgroundColor('#E8F0FF')
         .padding({ left: 14, right: 14 })
-        .onClick(() => replaceUrlByContext(this, { url: 'pages/Index' }))
+        .onClick(() => this.openAudiencePrimaryAction())
     }
     .width('100%')
   }
@@ -317,6 +370,17 @@ struct OrderListPage {
     Scroll() {
       Column({ space: 14 }) {
         this.buildHeader()
+
+        if (this.audiencePresentation().readOnlyHint.length > 0) {
+          Text(this.audiencePresentation().readOnlyHint)
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor('#8A4B4B')
+            .padding(12)
+            .backgroundColor('#FCE8E8')
+            .borderRadius(14)
+        }
 
         if (this.orders.length > 0) {
           this.buildSummaryCard()

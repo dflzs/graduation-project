@@ -1,10 +1,19 @@
 import {
+  AppealEligibility,
+  AppealRecord,
+  AppealStatus,
   AuthSession,
   Campus,
   ChatMessage,
   ChatThread,
   LocationGroup,
   MessageNotification,
+  ModerationRecord,
+  ModerationStatus,
+  GovernanceAction,
+  GovernanceActionType,
+  GovernanceSourceType,
+  GovernanceUserSummary,
   NotificationType,
   OperationResult,
   Order,
@@ -16,9 +25,11 @@ import {
   SyncPayload,
   TradeLocation,
   User,
+  UserStatus,
   VerificationCodeDispatch,
   VerificationStatus
 } from './domain';
+import { RemoteCreateProductPayload } from './product-remote';
 
 export interface AuthService {
   sendLoginCode(phone: string): Promise<OperationResult<VerificationCodeDispatch>>;
@@ -35,11 +46,13 @@ export interface AuthService {
 }
 
 export interface OrderService {
-  createOrder(buyerId: string, productId: string, address: string): OperationResult<Order>;
-  simulatePay(orderId: string, operatorId: string): OperationResult<Order>;
-  cancelOrder(orderId: string, operatorId: string): OperationResult<Order>;
-  markArrived(orderId: string, operatorId: string): OperationResult<Order>;
-  completeOrder(orderId: string, operatorId: string): OperationResult<Order>;
+  createOrder(buyerId: string, productId: string, address: string): Promise<OperationResult<Order>>;
+  listMyOrders(userId: string): Promise<OperationResult<Order[]>>;
+  getOrderDetail(orderId: string, viewerId: string): Promise<OperationResult<Order | null>>;
+  simulatePay(orderId: string, operatorId: string): Promise<OperationResult<Order>>;
+  cancelOrder(orderId: string, operatorId: string): Promise<OperationResult<Order>>;
+  markArrived(orderId: string, operatorId: string): Promise<OperationResult<Order>>;
+  completeOrder(orderId: string, operatorId: string): Promise<OperationResult<Order>>;
   addReview(orderId: string, fromUserId: string, rating: number, tag: string, comment: string): OperationResult<Review>;
 }
 
@@ -69,6 +82,25 @@ export interface GuardService {
   canAccessAdmin(user: User | null): boolean;
 }
 
+export interface AdminUserService {
+  listUsers(): Promise<OperationResult<User[]>>;
+  updateUserStatus(userId: string, status: UserStatus): Promise<OperationResult<User>>;
+}
+
+export interface AdminProductService {
+  listProducts(): Promise<OperationResult<Product[]>>;
+  approveProduct(productId: string): Promise<OperationResult<Product>>;
+  rejectProduct(productId: string): Promise<OperationResult<Product>>;
+  forceOffShelfProduct(productId: string): Promise<OperationResult<Product>>;
+}
+
+export interface MarketplaceProductService {
+  listMarketplaceProducts(): Promise<OperationResult<Product[]>>;
+  listMyPublishedProducts(userId: string): Promise<OperationResult<Product[]>>;
+  getProductDetail(productId: string): Promise<OperationResult<Product>>;
+  createMarketplaceProduct(input: RemoteCreateProductPayload, sellerId: string): Promise<OperationResult<Product>>;
+}
+
 export interface NotificationService {
   listByUser(userId: string): MessageNotification[];
   countUnread(userId: string): number;
@@ -89,13 +121,94 @@ export interface NotificationService {
   notifyProductRejected(sellerId: string, productTitle: string, productId: string): void;
 }
 
+export interface ModerationService {
+  submitProductReport(
+    productId: string,
+    reporterId: string,
+    reason: string,
+    description: string
+  ): Promise<OperationResult<ModerationRecord>>;
+  submitUserReport(
+    userId: string,
+    reporterId: string,
+    reason: string,
+    description: string
+  ): Promise<OperationResult<ModerationRecord>>;
+  submitOrderComplaint(
+    orderId: string,
+    reporterId: string,
+    reason: string,
+    description: string
+  ): Promise<OperationResult<ModerationRecord>>;
+  submitChatReport(
+    threadId: string,
+    reporterId: string,
+    reason: string,
+    description: string
+  ): Promise<OperationResult<ModerationRecord>>;
+  listMyModerationRecords(reporterId: string): Promise<OperationResult<ModerationRecord[]>>;
+  listModerationRecords(status?: ModerationStatus): Promise<OperationResult<ModerationRecord[]>>;
+  triageModerationRecord(recordId: string, adminComment: string): Promise<OperationResult<ModerationRecord>>;
+  requestModerationEvidence(recordId: string, adminComment: string): Promise<OperationResult<ModerationRecord>>;
+  closeModerationRecord(recordId: string, adminComment: string): Promise<OperationResult<ModerationRecord>>;
+  reviewModerationRecord(
+    recordId: string,
+    status: ModerationStatus,
+    adminComment: string
+  ): Promise<OperationResult<ModerationRecord>>;
+  reviewModerationRecordWithGovernance(
+    recordId: string,
+    status: ModerationStatus,
+    adminComment: string,
+    governanceActionType?: GovernanceActionType
+  ): Promise<OperationResult<ModerationRecord>>;
+}
+
+export interface AppealService {
+  checkAppealEligibility(
+    moderationRecordId: string,
+    appellantId: string
+  ): Promise<OperationResult<AppealEligibility>>;
+  submitAppeal(
+    moderationRecordId: string,
+    appellantId: string,
+    reason: string,
+    description: string,
+    evidenceItems?: string[]
+  ): Promise<OperationResult<AppealRecord>>;
+  listMyAppeals(appellantId: string): Promise<OperationResult<AppealRecord[]>>;
+  listAppeals(status?: AppealStatus): Promise<OperationResult<AppealRecord[]>>;
+  reviewAppeal(
+    appealId: string,
+    status: AppealStatus,
+    reviewComment: string
+  ): Promise<OperationResult<AppealRecord>>;
+}
+
+export interface GovernanceService {
+  createAction(
+    userId: string,
+    sourceType: GovernanceSourceType,
+    sourceId: string,
+    actionType: GovernanceActionType,
+    reason: string,
+    comment: string,
+    startAt: number,
+    endAt?: number
+  ): Promise<OperationResult<GovernanceAction>>;
+  listActions(): Promise<OperationResult<GovernanceAction[]>>;
+  listActionsByUser(userId: string): Promise<OperationResult<GovernanceAction[]>>;
+  cancelAction(actionId: string, comment: string): Promise<OperationResult<GovernanceAction>>;
+  getUserSummary(userId: string): Promise<OperationResult<GovernanceUserSummary>>;
+}
+
 export interface ChatService {
-  listThreads(userId: string): ChatThread[];
-  countUnread(userId: string): number;
+  listThreads(userId: string): Promise<ChatThread[]>;
+  countUnread(userId: string): Promise<number>;
   getThread(threadId: string, viewerId: string): ChatThread | null;
-  getMessages(threadId: string): ChatMessage[];
-  openProductThread(productId: string, buyerId: string, sellerId: string): OperationResult<string>;
-  sendMessage(threadId: string, fromUserId: string, content: string): OperationResult<ChatMessage>;
+  getMessages(threadId: string, viewerId: string): Promise<ChatMessage[]>;
+  openProductThread(productId: string, buyerId: string, sellerId: string): Promise<OperationResult<string>>;
+  sendMessage(threadId: string, fromUserId: string, content: string): Promise<OperationResult<ChatMessage>>;
   markThreadRead(threadId: string, viewerId: string): void;
 }
 

@@ -35,7 +35,17 @@ import {
   buildVerificationEditorPresentation,
   resolveDisplayedVerificationStatus
 } from '../../utils/campus-verification-lifecycle-ui';
+import {
+  buildCampusTrustTonePalette,
+  buildPublicCampusTrustPresentation
+} from '../../utils/campus-trust-ui';
 import { formatTime } from '../../utils/time';
+import {
+  buildGovernanceCenterAudiencePresentation,
+  buildMarketplaceUserSyncKeys
+} from '../../utils/marketplace-audience-ui';
+import { buildGovernanceCenterEntryActionLabel } from '../../utils/governance-center-copy';
+import { getMarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -85,13 +95,31 @@ struct ProfilePage {
   private pendingSchoolDraftValue: string = '';
   private pendingCollegeDraftValue: string = '';
   private pendingMajorDraftValue: string = '';
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     this.refresh();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
     this.refresh();
+  }
+
+  aboutToDisappear(): void {
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.refresh();
+      })
+    );
   }
 
   private refresh(): void {
@@ -427,6 +455,25 @@ struct ProfilePage {
     return user.status === 'active' ? '\u8d26\u53f7\u72b6\u6001\u6b63\u5e38' : '\u8d26\u53f7\u5f53\u524d\u53d7\u9650';
   }
 
+  private openGovernanceCenter(): void {
+    pushUrlByContext(this, { url: 'pages/Profile/GovernanceCenterPage' });
+  }
+
+  private getGovernanceCenterHelperText(): string {
+    return buildGovernanceCenterAudiencePresentation(getMarketplaceAudienceMode(this.user)).headerDescription;
+  }
+
+  private getGovernanceCenterActionLabel(): string {
+    const presentation = buildGovernanceCenterAudiencePresentation(getMarketplaceAudienceMode(this.user));
+    if (presentation.primaryAction === 'login') {
+      return buildGovernanceCenterEntryActionLabel('guest');
+    }
+    if (presentation.primaryAction === 'admin') {
+      return buildGovernanceCenterEntryActionLabel('admin');
+    }
+    return buildGovernanceCenterEntryActionLabel('trader');
+  }
+
   private hasPendingAvatarDraft(): boolean {
     if (this.avatarLocalPath.length > 0) {
       return true;
@@ -459,7 +506,39 @@ struct ProfilePage {
   }
 
   private getCampusTrustSummary(): string {
-    return `\u5b8c\u6210\u4ea4\u6613 ${this.user?.completedOrderCount ?? 0} \u7b14 / \u4e3e\u62a5\u8bb0\u5f55 ${this.user?.reportCount ?? 0} \u6b21`;
+    if (!this.user) {
+      return '';
+    }
+    return buildPublicCampusTrustPresentation(this.user).trustTags.join(' / ');
+  }
+
+  private getCampusTrustRiskText(): string {
+    if (!this.user) {
+      return '';
+    }
+    return buildPublicCampusTrustPresentation(this.user).riskText;
+  }
+
+  private getCampusTrustRiskLabel(): string {
+    if (!this.user) {
+      return '';
+    }
+    return buildPublicCampusTrustPresentation(this.user).riskLabel;
+  }
+
+  private getCampusTrustTone(): 'calm' | 'caution' | 'warning' {
+    if (!this.user) {
+      return 'calm';
+    }
+    return buildPublicCampusTrustPresentation(this.user).tone;
+  }
+
+  private getCampusTrustRiskTextColor(): string {
+    return buildCampusTrustTonePalette(this.getCampusTrustTone()).riskBadgeTextColor;
+  }
+
+  private getCampusTrustRiskBackground(): string {
+    return buildCampusTrustTonePalette(this.getCampusTrustTone()).riskBadgeBackgroundColor;
   }
 
   private hasPendingVerificationMaterialDraft(): boolean {
@@ -1226,6 +1305,20 @@ struct ProfilePage {
         .fontSize(12)
         .fontColor('#8C867F')
 
+      Text(this.getCampusTrustRiskLabel())
+        .fontSize(11)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.getCampusTrustRiskTextColor())
+        .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+        .backgroundColor(this.getCampusTrustRiskBackground())
+        .borderRadius(12)
+
+      Text(this.getCampusTrustRiskText())
+        .width('100%')
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor('#8C867F')
+
       Row({ space: 10 }) {
         Button(this.isCampusSaving ? '\u4fdd\u5b58\u4e2d...' : '\u4fdd\u5b58\u6821\u56ed\u8d44\u6599')
           .layoutWeight(1)
@@ -1503,6 +1596,55 @@ struct ProfilePage {
   }
 
   @Builder
+  private buildGovernanceEntryCard(): void {
+    Column({ space: 12 }) {
+      Row() {
+        Column({ space: 4 }) {
+          Text('\u6cbb\u7406\u4e2d\u5fc3')
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(TITLE_COLOR)
+
+          Text(this.getGovernanceCenterHelperText())
+            .fontSize(13)
+            .lineHeight(20)
+            .fontColor(SUB_TEXT_COLOR)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Text('\u8bb0\u5f55')
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#237B46')
+          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .backgroundColor('#E8F5EA')
+          .borderRadius(14)
+      }
+      .width('100%')
+
+      Text('\u4f60\u63d0\u4ea4\u8fc7\u7684\u4e3e\u62a5\u3001\u6295\u8bc9\u548c\u7533\u8bc9\uff0c\u4f1a\u5728\u8fd9\u91cc\u6301\u7eed\u66f4\u65b0\u5904\u7406\u72b6\u6001\u3001\u8865\u8bc1\u8981\u6c42\u548c\u590d\u6838\u7ed3\u679c\u3002')
+        .width('100%')
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor('#8C867F')
+
+      Button(this.getGovernanceCenterActionLabel())
+        .width('100%')
+        .height(44)
+        .backgroundColor('#E8F0FF')
+        .fontColor('#2F6BFF')
+        .borderRadius(14)
+        .onClick(() => this.openGovernanceCenter())
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor(CARD_BACKGROUND)
+    .borderRadius(22)
+    .border({ width: 1, color: CARD_BORDER })
+  }
+
+  @Builder
   private buildProfileForm(user: User): void {
     Column({ space: 16 }) {
       Column({ space: 16 }) {
@@ -1548,6 +1690,7 @@ struct ProfilePage {
       if (user.role !== 'admin') {
         this.buildCampusIdentityCard()
         this.buildVerificationCard()
+        this.buildGovernanceEntryCard()
       }
 
       Column({ space: 10 }) {

@@ -6,10 +6,22 @@ import { reviewRepository } from '../../repositories/review.repo';
 import { userRepository } from '../../repositories/user.repo';
 import { Order, OrderStatus, Product, Review, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
-import { canUserAccessOrder } from '../../utils/trade-guard';
-import { backByContext, getParamsByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
+import {
+  canAccessTradeRecord,
+  canCurrentUserOperateTrade,
+  getTradeReadOnlyHint,
+  getTradeRecordUnavailableDescription,
+  getTradeRecordUnavailableTitle,
+  shouldTreatTradeRecordAsAccessDenied
+} from '../../utils/trade-guard';
+import { backByContext, getParamsByContext, pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { buildOrderDetailReturnTarget } from '../../utils/detail-return-route';
-import { buildPublicCampusTrustPresentation, CampusTrustPresentation } from '../../utils/campus-trust-ui';
+import {
+  buildCampusTrustTonePalette,
+  buildPublicCampusTrustPresentation,
+  CampusTrustPresentation
+} from '../../utils/campus-trust-ui';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFCF8';
@@ -37,12 +49,16 @@ struct OrderDetailPage {
   @State rating: number = 5;
   @State reviewTag: string = '交易顺利';
   @State reviewComment: string = '';
+  private orderSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
     const params = getParamsByContext<Record<string, string>>(this);
     this.orderId = params?.orderId ?? '';
     this.source = params?.source ?? '';
     this.refresh();
+    this.bindOrderSync();
+    this.bindUserSync();
   }
 
   onPageShow(): void {
@@ -50,14 +66,46 @@ struct OrderDetailPage {
   }
 
   aboutToDisappear(): void {
+    if (this.orderSyncUnsubscriber) {
+      this.orderSyncUnsubscriber();
+      this.orderSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
     this.publishReturnRefreshSignals();
   }
 
-  private refresh(): void {
+  private bindOrderSync(): void {
+    if (this.orderSyncUnsubscriber) {
+      return;
+    }
+    this.orderSyncUnsubscriber = appContext.sync.subscribe('orders:changed', () => {
+      this.refresh();
+    });
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.refresh();
+      })
+    );
+  }
+
+  private async refresh(): Promise<void> {
     const currentUser: User | null = this.currentUser();
-    const order: Order | null = orderRepository.getById(this.orderId);
-    if (!currentUser || !order || !canUserAccessOrder(order, currentUser.id)) {
-      this.accessDenied = order !== null && currentUser !== null;
+    let order: Order | null = orderRepository.getById(this.orderId);
+    if (currentUser) {
+      const refreshed = await appContext.order.getOrderDetail(this.orderId, currentUser.id);
+      order = refreshed.data ?? orderRepository.getById(this.orderId);
+    }
+    const canAccessOrder: boolean = order !== null
+      && canAccessTradeRecord(currentUser, [order.buyerId, order.sellerId]);
+    if (!currentUser || !order || !canAccessOrder) {
+      this.accessDenied = shouldTreatTradeRecordAsAccessDenied(currentUser, order !== null, canAccessOrder);
       this.order = null;
       this.product = null;
       this.reviews = [];
@@ -94,6 +142,10 @@ struct OrderDetailPage {
   private isBuyer(): boolean {
     const user: User | null = this.currentUser();
     return user !== null && this.order !== null && user.id === this.order.buyerId;
+  }
+
+  private isReadOnlyTradeView(): boolean {
+    return !canCurrentUserOperateTrade(this.currentUser());
   }
 
   private getStatusColor(status: OrderStatus): string {
@@ -163,6 +215,26 @@ struct OrderDetailPage {
     }
     const counterpartyId: string = this.isBuyer() ? this.order.sellerId : this.order.buyerId;
     return buildPublicCampusTrustPresentation(userRepository.getById(counterpartyId));
+  }
+
+  private getCounterpartyTrustCardBackground(): string {
+    return buildCampusTrustTonePalette(this.getCounterpartyTrustPresentation().tone).surfaceBackgroundColor;
+  }
+
+  private getCounterpartyTrustRiskTextColor(): string {
+    return buildCampusTrustTonePalette(this.getCounterpartyTrustPresentation().tone).riskBadgeTextColor;
+  }
+
+  private getCounterpartyTrustRiskBackground(): string {
+    return buildCampusTrustTonePalette(this.getCounterpartyTrustPresentation().tone).riskBadgeBackgroundColor;
+  }
+
+  private getCounterpartyTrustTagTextColor(): string {
+    return buildCampusTrustTonePalette(this.getCounterpartyTrustPresentation().tone).tagTextColor;
+  }
+
+  private getCounterpartyTrustTagBackground(): string {
+    return buildCampusTrustTonePalette(this.getCounterpartyTrustPresentation().tone).tagBackgroundColor;
   }
 
   private getExistingReview(): Review | null {
@@ -261,7 +333,8 @@ struct OrderDetailPage {
     backgroundColor: string,
     textColor: string,
     borderColor: string,
-    onClickHandler: () => void
+    onClickHandler: () => void,
+    enabled: boolean = true
   ): void {
     Button(text)
       .width('100%')
@@ -273,24 +346,26 @@ struct OrderDetailPage {
       .backgroundColor(backgroundColor)
       .borderRadius(16)
       .border({ width: 1, color: borderColor })
+      .enabled(enabled)
+      .opacity(enabled ? 1 : 0.6)
       .onClick(onClickHandler)
   }
 
-  private runAction(action: 'pay' | 'cancel' | 'arrive' | 'complete'): void {
+  private async runAction(action: 'pay' | 'cancel' | 'arrive' | 'complete'): Promise<void> {
     const user: User | null = this.currentUser();
-    if (!user || !this.order) {
+    if (!user || !this.order || this.isReadOnlyTradeView()) {
       return;
     }
 
     let message = '';
     if (action === 'pay') {
-      message = appContext.order.simulatePay(this.order.id, user.id).message;
+      message = (await appContext.order.simulatePay(this.order.id, user.id)).message;
     } else if (action === 'cancel') {
-      message = appContext.order.cancelOrder(this.order.id, user.id).message;
+      message = (await appContext.order.cancelOrder(this.order.id, user.id)).message;
     } else if (action === 'arrive') {
-      message = appContext.order.markArrived(this.order.id, user.id).message;
+      message = (await appContext.order.markArrived(this.order.id, user.id)).message;
     } else if (action === 'complete') {
-      message = appContext.order.completeOrder(this.order.id, user.id).message;
+      message = (await appContext.order.completeOrder(this.order.id, user.id)).message;
     }
 
     showToastByContext(this, { message, duration: 1500 });
@@ -299,7 +374,7 @@ struct OrderDetailPage {
 
   private submitReview(): void {
     const user: User | null = this.currentUser();
-    if (!user || !this.order) {
+    if (!user || !this.order || this.isReadOnlyTradeView()) {
       return;
     }
     const result = appContext.order.addReview(this.order.id, user.id, this.rating, this.reviewTag, this.reviewComment);
@@ -307,6 +382,20 @@ struct OrderDetailPage {
     if (result.ok) {
       this.refresh();
     }
+  }
+
+  private openComplaintPage(): void {
+    if (!this.order || this.isReadOnlyTradeView()) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Moderation/SubmitModerationPage',
+      params: {
+        targetType: 'order_complaint',
+        targetId: this.order.id,
+        title: this.product?.title ?? '当前订单'
+      }
+    });
   }
 
   private goBack(): void {
@@ -321,14 +410,12 @@ struct OrderDetailPage {
   @Builder
   private buildMissingState(): void {
     Column({ space: 10 }) {
-      Text(this.accessDenied ? '无权查看该订单' : '未找到订单信息')
+      Text(getTradeRecordUnavailableTitle('order', this.currentUser(), this.accessDenied))
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(TEXT_COLOR)
 
-      Text(this.accessDenied
-        ? '这笔订单不属于当前账号，请返回订单列表查看你自己的交易记录。'
-        : '请返回订单列表重新进入详情页，或确认订单是否已经被删除。')
+      Text(getTradeRecordUnavailableDescription('order', this.currentUser(), this.accessDenied))
         .fontSize(14)
         .fontColor(MUTED_COLOR)
         .textAlign(TextAlign.Center)
@@ -550,20 +637,52 @@ struct OrderDetailPage {
         .fontWeight(FontWeight.Bold)
         .fontColor(TEXT_COLOR)
 
-      Text(this.getCounterpartyTrustPresentation().summary)
+      Row({ space: 8 }) {
+        Text(this.getCounterpartyTrustPresentation().summary)
+          .layoutWeight(1)
+          .fontSize(14)
+          .fontColor('#4E4740')
+
+        Text(this.getCounterpartyTrustPresentation().riskLabel)
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.getCounterpartyTrustRiskTextColor())
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.getCounterpartyTrustRiskBackground())
+          .borderRadius(12)
+      }
+      .width('100%')
+
+      if (this.getCounterpartyTrustPresentation().trustTags.length > 0) {
+        Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row }) {
+          ForEach(this.getCounterpartyTrustPresentation().trustTags, (tag: string) => {
+            Text(tag)
+              .fontSize(11)
+              .fontColor(this.getCounterpartyTrustTagTextColor())
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .backgroundColor(this.getCounterpartyTrustTagBackground())
+              .borderRadius(12)
+              .margin({ right: 8, bottom: 8 })
+          }, (tag: string) => tag)
+        }
         .width('100%')
-        .fontSize(14)
-        .fontColor('#4E4740')
+      }
 
       Text(this.getCounterpartyTrustPresentation().helperText)
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
         .fontColor(MUTED_COLOR)
+
+      Text(this.getCounterpartyTrustPresentation().riskText)
+        .width('100%')
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor('#8C867F')
     }
     .width('100%')
     .padding(18)
-    .backgroundColor(CARD_BACKGROUND)
+    .backgroundColor(this.getCounterpartyTrustCardBackground())
     .borderRadius(22)
     .border({ width: 1, color: CARD_BORDER })
   }
@@ -586,6 +705,24 @@ struct OrderDetailPage {
         .width('100%')
         .padding(14)
         .backgroundColor(CARD_SOFT_BACKGROUND)
+        .borderRadius(16)
+      } else if (this.isReadOnlyTradeView()) {
+        Column({ space: 8 }) {
+          Text('当前订单已切换为只读')
+            .width('100%')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(DANGER_TEXT_COLOR)
+
+          Text(getTradeReadOnlyHint(this.currentUser(), 'order'))
+            .width('100%')
+            .fontSize(13)
+            .lineHeight(20)
+            .fontColor(MUTED_COLOR)
+        }
+        .width('100%')
+        .padding(14)
+        .backgroundColor('#F8ECE4')
         .borderRadius(16)
       } else {
         Text('用一句简短评价记录这次交易体验，方便后续查看。')
@@ -645,7 +782,27 @@ struct OrderDetailPage {
         .fontWeight(FontWeight.Medium)
         .fontColor(FIELD_LABEL_COLOR)
 
-      if (order.status === OrderStatus.PENDING_PAYMENT && this.isBuyer()) {
+      if (this.isReadOnlyTradeView()) {
+        Column({ space: 8 }) {
+          Text('当前订单已切换为只读')
+            .width('100%')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(DANGER_TEXT_COLOR)
+
+          Text(getTradeReadOnlyHint(this.currentUser(), 'order'))
+            .width('100%')
+            .fontSize(13)
+            .lineHeight(20)
+            .fontColor(MUTED_COLOR)
+        }
+        .width('100%')
+        .padding(14)
+        .backgroundColor('#F8ECE4')
+        .borderRadius(16)
+
+        this.buildActionButton('杩斿洖璁㈠崟鍒楄〃', '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.goBack())
+      } else if (order.status === OrderStatus.PENDING_PAYMENT && this.isBuyer()) {
         this.buildActionButton('完成模拟支付', PRIMARY_COLOR, '#FFFFFF', PRIMARY_COLOR, () => this.runAction('pay'))
         this.buildActionButton('取消订单', DANGER_BACKGROUND, DANGER_TEXT_COLOR, DANGER_BORDER, () => this.runAction('cancel'))
       } else if (order.status === OrderStatus.PAID_SIMULATED) {
@@ -677,6 +834,30 @@ struct OrderDetailPage {
     .border({ width: 1, color: CARD_BORDER })
   }
 
+  @Builder
+  private buildModerationCard(order: Order): void {
+    Column({ space: 10 }) {
+      Text('订单投诉')
+        .width('100%')
+        .fontSize(15)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(FIELD_LABEL_COLOR)
+
+      Text(`如果这笔订单存在沟通失约、到场纠纷或异常交易情况，可以提交投诉，平台会进入人工处理。`)
+        .width('100%')
+        .fontSize(13)
+        .lineHeight(20)
+        .fontColor(MUTED_COLOR)
+
+      this.buildActionButton('提交投诉', '#FFFFFF', '#A86B00', '#E8D8B6', () => this.openComplaintPage())
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor(CARD_BACKGROUND)
+    .borderRadius(22)
+    .border({ width: 1, color: CARD_BORDER })
+  }
+
   build() {
     Scroll() {
       Column({ space: 14 }) {
@@ -689,6 +870,9 @@ struct OrderDetailPage {
           this.buildProductCard(this.order)
           this.buildCounterpartyTrustCard()
           this.buildOrderInfoCard(this.order)
+          if (!this.isReadOnlyTradeView()) {
+            this.buildModerationCard(this.order)
+          }
           if (this.order.status === OrderStatus.COMPLETED) {
             this.buildReviewCard(this.order)
           }

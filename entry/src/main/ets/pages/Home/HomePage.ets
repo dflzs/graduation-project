@@ -4,10 +4,16 @@ import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
 import { PRODUCT_CATEGORIES } from '../../constants/config';
-import { productRepository } from '../../repositories/product.repo';
-import { remoteProductClient } from '../../services/product-remote.client';
+import { userRepository } from '../../repositories/user.repo';
 import { Announcement, Product, User } from '../../types/domain';
-import { resolveVisibleRemoteHomeProducts } from '../../utils/product-feed';
+import {
+  buildCampusTrustListSnippet,
+  buildCampusTrustTonePalette,
+  buildPublicCampusTrustPresentation,
+  CampusTrustListSnippet,
+  CampusTrustPresentation
+} from '../../utils/campus-trust-ui';
+import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
 import { openPublishEntry } from '../../utils/publish-entry';
 import { buildProductRowRenderKey } from '../../utils/render-keys';
 
@@ -71,17 +77,22 @@ export struct HomePage {
   @State latestAnnouncements: Announcement[] = [];
   @State selectedCategory: string = HOME_RECOMMEND_CATEGORY;
   private homeFeedUnsubscriber: (() => void) | null = null;
-  private knownRemoteProductIds: string[] = [];
+  private announcementSyncUnsubscriber: (() => void) | null = null;
+  private userSyncUnsubscribers: Array<() => void> = [];
 
   aboutToAppear(): void {
-    this.refreshAnnouncements();
+    this.refreshViewerState();
+    void this.refreshAnnouncements();
     this.bindLocalProductFeed();
+    this.bindAnnouncementFeed();
+    this.bindUserSync();
     this.refreshProductsFromLocalState();
     void this.refreshProducts();
   }
 
   onPageShow(): void {
-    this.refreshAnnouncements();
+    this.refreshViewerState();
+    void this.refreshAnnouncements();
     this.refreshProductsFromLocalState();
     void this.refreshProducts();
   }
@@ -91,6 +102,12 @@ export struct HomePage {
       this.homeFeedUnsubscriber();
       this.homeFeedUnsubscriber = null;
     }
+    if (this.announcementSyncUnsubscriber) {
+      this.announcementSyncUnsubscriber();
+      this.announcementSyncUnsubscriber = null;
+    }
+    this.userSyncUnsubscribers.forEach((unsubscribe: () => void) => unsubscribe());
+    this.userSyncUnsubscribers = [];
   }
 
   private bindLocalProductFeed(): void {
@@ -99,27 +116,53 @@ export struct HomePage {
     }
 
     this.homeFeedUnsubscriber = appContext.sync.subscribe('products:changed', () => {
-      this.refreshProductsFromLocalState();
+      void this.refreshProducts();
     });
   }
 
-  private refreshAnnouncements(): void {
-    this.latestAnnouncements = appContext.announcement.list()
+  private bindAnnouncementFeed(): void {
+    if (this.announcementSyncUnsubscriber) {
+      return;
+    }
+
+    this.announcementSyncUnsubscriber = appContext.sync.subscribe('announcements:changed', () => {
+      void this.refreshAnnouncements();
+    });
+  }
+
+  private bindUserSync(): void {
+    if (this.userSyncUnsubscribers.length > 0) {
+      return;
+    }
+
+    this.userSyncUnsubscribers = buildMarketplaceUserSyncKeys().map((key: string) =>
+      appContext.sync.subscribe(key, () => {
+        this.refreshViewerState();
+      })
+    );
+  }
+
+  private refreshViewerState(): void {
+    const user: User | null = appContext.getCurrentUser();
+    this.username = user ? user.nickname : '';
+  }
+
+  private async refreshAnnouncements(): Promise<void> {
+    this.latestAnnouncements = (await appContext.announcement.list())
       .sort((a: Announcement, b: Announcement) => b.createdAt - a.createdAt)
       .slice(0, 2);
   }
 
   private async refreshProducts(): Promise<void> {
-    const user: User | null = appContext.getCurrentUser();
-    this.username = user ? user.nickname : '';
+    this.refreshViewerState();
 
     this.isLoading = true;
     try {
-      const result = await remoteProductClient.listProducts({ status: 'on_sale' });
+      const result = await appContext.marketplaceProducts.listMarketplaceProducts();
       if (!result.ok || !result.data) {
-        this.knownRemoteProductIds = [];
-        this.refreshProductsFromLocalState();
-        this.errorText = this.allProducts.length === 0 ? (result.message || LOAD_FAILED_TEXT) : '';
+        this.allProducts = [];
+        this.applyFilters();
+        this.errorText = result.message || LOAD_FAILED_TEXT;
         showToastByContext(this, {
           message: result.message || LOAD_FAILED_TEXT,
           duration: 1800
@@ -127,14 +170,13 @@ export struct HomePage {
         return;
       }
 
-      const savedProducts: Product[] = result.data.map((item: Product) => productRepository.mergeRemote(item));
-      this.knownRemoteProductIds = savedProducts.map((item: Product) => item.id);
-      this.refreshProductsFromLocalState();
+      this.allProducts = result.data;
+      this.applyFilters();
       this.errorText = '';
     } catch (error) {
-      this.knownRemoteProductIds = [];
-      this.refreshProductsFromLocalState();
-      this.errorText = this.allProducts.length === 0 ? LOAD_FAILED_TEXT : '';
+      this.allProducts = [];
+      this.applyFilters();
+      this.errorText = LOAD_FAILED_TEXT;
       showToastByContext(this, {
         message: LOAD_FAILED_TEXT,
         duration: 1800
@@ -145,8 +187,7 @@ export struct HomePage {
   }
 
   private refreshProductsFromLocalState(): void {
-    this.allProducts = resolveVisibleRemoteHomeProducts(productRepository.list(), this.knownRemoteProductIds);
-    this.applyFilters();
+    void this.refreshProducts();
   }
 
   private applyFilters(): void {
@@ -197,6 +238,32 @@ export struct HomePage {
 
   private openProductDetail(productId: string): void {
     pushUrlByContext(this, { url: 'pages/Product/ProductDetailPage', params: { productId } });
+  }
+
+  private getSellerTrustPresentation(product: Product): CampusTrustPresentation {
+    return buildPublicCampusTrustPresentation(userRepository.getById(product.sellerId));
+  }
+
+  private getSellerTrustSnippet(product: Product): CampusTrustListSnippet {
+    return buildCampusTrustListSnippet(userRepository.getById(product.sellerId));
+  }
+
+  private getProductTrustCardBackground(product: Product): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation(product).tone).surfaceBackgroundColor;
+  }
+
+  private getProductTrustTagsText(product: Product): string {
+    const snippet = this.getSellerTrustSnippet(product);
+    const suffix = snippet.hasMoreTags ? ' · ...' : '';
+    return `${snippet.tags.join(' · ')}${suffix}`;
+  }
+
+  private getProductTrustRiskTextColor(product: Product): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation(product).tone).riskBadgeTextColor;
+  }
+
+  private getProductTrustRiskBackground(product: Product): string {
+    return buildCampusTrustTonePalette(this.getSellerTrustPresentation(product).tone).riskBadgeBackgroundColor;
   }
 
   @Builder
@@ -459,6 +526,43 @@ export struct HomePage {
       .justifyContent(FlexAlign.Start)
       .alignItems(HorizontalAlign.Start)
 
+      Column({ space: 6 }) {
+        Row({ space: 6 }) {
+          Text(this.getSellerTrustPresentation(product).badgeText)
+            .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.getSellerTrustPresentation(product).badgeTextColor)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.getSellerTrustPresentation(product).badgeBackgroundColor)
+            .borderRadius(12)
+
+          Text(this.getSellerTrustSnippet(product).riskLabel)
+            .fontSize(10)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.getProductTrustRiskTextColor(product))
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(this.getProductTrustRiskBackground(product))
+            .borderRadius(12)
+
+          Blank()
+        }
+        .width('100%')
+
+        if (this.getSellerTrustSnippet(product).tags.length > 0) {
+          Text(this.getProductTrustTagsText(product))
+            .width('100%')
+            .fontSize(11)
+            .lineHeight(14)
+            .fontColor('#7B756E')
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+      }
+      .width('100%')
+      .padding(10)
+      .backgroundColor(this.getProductTrustCardBackground(product))
+      .borderRadius(16)
+
       Column({ space: 4 }) {
         Text(`\uffe5${product.price.toFixed(2)}`)
           .width('100%')
@@ -486,7 +590,7 @@ export struct HomePage {
       .width('100%')
     }
     .layoutWeight(1)
-    .height(288)
+    .height(340)
     .padding(12)
     .backgroundColor(CARD_BACKGROUND)
     .borderRadius(22)

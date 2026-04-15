@@ -1,11 +1,27 @@
-﻿import { PRODUCT_CATEGORIES } from '../constants/config';
+import { PRODUCT_CATEGORIES } from '../constants/config';
 import { productRepository } from '../repositories/product.repo';
+import { userRepository } from '../repositories/user.repo';
 import { OperationResult, Product } from '../types/domain';
 import { ProductQuery, ProductService } from '../types/service-contracts';
 import { newId } from '../utils/id';
 import { isNotBlank } from '../utils/validator';
+import { syncService } from './sync.service.impl';
 
 export class ProductServiceImpl implements ProductService {
+  private canManageProduct(userId: string): OperationResult<null> {
+    const user = userRepository.getById(userId);
+    if (!user) {
+      return { ok: false, message: '用户不存在' };
+    }
+    if (user.status !== 'active') {
+      return { ok: false, message: '该账号已被停用，无法发布或编辑商品' };
+    }
+    if (user.role === 'admin') {
+      return { ok: false, message: '管理员账号不支持发布或编辑商品' };
+    }
+    return { ok: true, message: '', data: null };
+  }
+
   listProducts(query: ProductQuery = {}): Product[] {
     return productRepository.search({
       keyword: query.keyword,
@@ -19,6 +35,10 @@ export class ProductServiceImpl implements ProductService {
   }
 
   createProduct(input: Partial<Product>, sellerId: string): OperationResult<Product> {
+    const permission = this.canManageProduct(sellerId);
+    if (!permission.ok) {
+      return { ok: false, message: permission.message };
+    }
     if (!isNotBlank(input.title ?? '')) {
       return { ok: false, message: '标题不能为空' };
     }
@@ -53,6 +73,11 @@ export class ProductServiceImpl implements ProductService {
     };
 
     productRepository.save(product);
+    syncService.publish({
+      key: 'products:changed',
+      value: product.id,
+      updatedAt: product.updatedAt
+    });
     return {
       ok: true,
       message: '商品已提交审核',
@@ -61,6 +86,11 @@ export class ProductServiceImpl implements ProductService {
   }
 
   updateProduct(productId: string, input: Partial<Product>, operatorId: string): OperationResult<Product> {
+    const permission = this.canManageProduct(operatorId);
+    if (!permission.ok) {
+      return { ok: false, message: permission.message };
+    }
+
     const product: Product | null = productRepository.getById(productId);
     if (!product || product.isDeleted) {
       return { ok: false, message: '商品不存在' };
@@ -86,6 +116,11 @@ export class ProductServiceImpl implements ProductService {
     product.updatedAt = Date.now();
 
     productRepository.save(product);
+    syncService.publish({
+      key: 'products:changed',
+      value: product.id,
+      updatedAt: product.updatedAt
+    });
     return {
       ok: true,
       message: '更新成功',
