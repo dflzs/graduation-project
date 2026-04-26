@@ -4,8 +4,10 @@ import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
 import { PRODUCT_CATEGORIES } from '../../constants/config';
+import { chatRepository } from '../../repositories/chat.repo';
+import { orderRepository } from '../../repositories/order.repo';
 import { userRepository } from '../../repositories/user.repo';
-import { Announcement, Product, User } from '../../types/domain';
+import { Announcement, ChatThreadRecord, Order, Product, User } from '../../types/domain';
 import {
   buildCampusTrustListSnippet,
   buildCampusTrustTonePalette,
@@ -13,6 +15,14 @@ import {
   CampusTrustListSnippet,
   CampusTrustPresentation
 } from '../../utils/campus-trust-ui';
+import {
+  buildHomeProductConversationActionLabel,
+  buildHomeProductConversationHint,
+  buildHomeProductOwnerConversationHint,
+  buildHomeProductTradeActionLabel,
+  buildHomeProductTradeHint,
+  resolveHomeProductTradeAction
+} from '../../utils/home-trade-resume';
 import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
 import { openPublishEntry } from '../../utils/publish-entry';
 import { buildProductRowRenderKey } from '../../utils/render-keys';
@@ -238,6 +248,148 @@ export struct HomePage {
 
   private openProductDetail(productId: string): void {
     pushUrlByContext(this, { url: 'pages/Product/ProductDetailPage', params: { productId } });
+  }
+
+  private getViewerProductThread(product: Product): ChatThreadRecord | null {
+    const viewer: User | null = appContext.getCurrentUser();
+    if (!viewer || viewer.role !== 'user' || viewer.id === product.sellerId) {
+      return null;
+    }
+    return chatRepository.findLatestThreadByProductAndUser(product.id, viewer.id);
+  }
+
+  private hasViewerProductThread(product: Product): boolean {
+    return this.getViewerProductThread(product) !== null;
+  }
+
+  private getOwnerProductThread(product: Product): ChatThreadRecord | null {
+    const viewer: User | null = appContext.getCurrentUser();
+    if (!viewer || viewer.role !== 'user' || viewer.id !== product.sellerId) {
+      return null;
+    }
+    return chatRepository.findLatestThreadByProductAndUser(product.id, viewer.id);
+  }
+
+  private hasOwnerProductThread(product: Product): boolean {
+    return this.getOwnerProductThread(product) !== null;
+  }
+
+  private getOwnerProductBuyerName(product: Product): string {
+    const thread = this.getOwnerProductThread(product);
+    if (!thread) {
+      return '';
+    }
+    return userRepository.getById(thread.buyerId)?.nickname ?? '';
+  }
+
+  private getViewerProductOrder(product: Product): Order | null {
+    const viewer: User | null = appContext.getCurrentUser();
+    if (!viewer || viewer.role !== 'user' || viewer.id === product.sellerId) {
+      return null;
+    }
+    return orderRepository.findLatestByTradeContext(product.id, viewer.id, product.sellerId);
+  }
+
+  private getOwnerProductOrder(product: Product): Order | null {
+    const viewer: User | null = appContext.getCurrentUser();
+    const thread = this.getOwnerProductThread(product);
+    if (!viewer || viewer.role !== 'user' || viewer.id !== product.sellerId || !thread) {
+      return null;
+    }
+    return orderRepository.findLatestByTradeContext(product.id, thread.buyerId, product.sellerId);
+  }
+
+  private getHomeProductOrder(product: Product): Order | null {
+    return this.getViewerProductOrder(product) ?? this.getOwnerProductOrder(product);
+  }
+
+  private hasHomeTradeRecovery(product: Product): boolean {
+    return this.hasAnyProductThread(product) || this.getHomeProductOrder(product) !== null;
+  }
+
+  private openProductOrder(product: Product): void {
+    const order = this.getHomeProductOrder(product);
+    if (!order) {
+      this.openProductDetail(product.id);
+      return;
+    }
+    pushUrlByContext(this, { url: 'pages/Order/OrderDetailPage', params: { orderId: order.id } });
+  }
+
+  private openHomeTradeRecovery(product: Product): void {
+    const viewerId = appContext.getCurrentUser()?.id ?? '';
+    const hasThread = this.hasAnyProductThread(product);
+    const order = this.getHomeProductOrder(product);
+    const action = resolveHomeProductTradeAction(order, viewerId, hasThread);
+    if (action === 'chat') {
+      this.openProductConversation(product);
+      return;
+    }
+    if (action === 'order') {
+      this.openProductOrder(product);
+      return;
+    }
+    this.openProductDetail(product.id);
+  }
+
+  private getResolvedProductCardActionLabel(product: Product): string {
+    const viewerId = appContext.getCurrentUser()?.id ?? '';
+    const hasThread = this.hasAnyProductThread(product);
+    const order = this.getHomeProductOrder(product);
+    if (!order && hasThread) {
+      return buildHomeProductConversationActionLabel();
+    }
+    return buildHomeProductTradeActionLabel(order, viewerId, hasThread);
+  }
+
+  private getResolvedProductCardConversationHint(product: Product): string {
+    const viewerId = appContext.getCurrentUser()?.id ?? '';
+    if (this.hasViewerProductThread(product) || this.getViewerProductOrder(product)) {
+      return buildHomeProductTradeHint(
+        this.getViewerProductOrder(product),
+        viewerId,
+        '',
+        false,
+        this.hasViewerProductThread(product)
+      );
+    }
+    if (this.hasOwnerProductThread(product) || this.getOwnerProductOrder(product)) {
+      return buildHomeProductTradeHint(
+        this.getOwnerProductOrder(product),
+        viewerId,
+        this.getOwnerProductBuyerName(product),
+        true,
+        this.hasOwnerProductThread(product)
+      );
+    }
+    return '';
+  }
+
+  private openProductConversation(product: Product): void {
+    const thread = this.getViewerProductThread(product) ?? this.getOwnerProductThread(product);
+    if (!thread) {
+      this.openProductDetail(product.id);
+      return;
+    }
+    pushUrlByContext(this, { url: 'pages/Chat/ChatDetailPage', params: { threadId: thread.id } });
+  }
+
+  private getProductCardActionLabel(product: Product): string {
+    return this.hasAnyProductThread(product) ? buildHomeProductConversationActionLabel() : '详情 >';
+  }
+
+  private getProductCardConversationHint(product: Product): string {
+    if (this.hasViewerProductThread(product)) {
+      return buildHomeProductConversationHint(true);
+    }
+    if (this.hasOwnerProductThread(product)) {
+      return buildHomeProductOwnerConversationHint(this.getOwnerProductBuyerName(product));
+    }
+    return '';
+  }
+
+  private hasAnyProductThread(product: Product): boolean {
+    return this.hasViewerProductThread(product) || this.hasOwnerProductThread(product);
   }
 
   private getSellerTrustPresentation(product: Product): CampusTrustPresentation {
@@ -571,6 +723,16 @@ export struct HomePage {
           .fontColor('#E05A47')
           .maxLines(1)
 
+        if (this.hasHomeTradeRecovery(product)) {
+          Text(this.getResolvedProductCardConversationHint(product))
+            .width('100%')
+            .fontSize(11)
+            .lineHeight(15)
+            .fontColor('#5E6B88')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+
         Row() {
           Text('\u652f\u6301\u9762\u4ea4')
             .fontSize(10)
@@ -579,10 +741,17 @@ export struct HomePage {
 
           Blank()
 
-          Text('\u8be6\u60c5 >')
+          Text(this.getResolvedProductCardActionLabel(product))
             .fontSize(10)
             .fontWeight(FontWeight.Medium)
             .fontColor('#2F6BFF')
+            .onClick(() => {
+              if (this.hasHomeTradeRecovery(product)) {
+                this.openHomeTradeRecovery(product);
+                return;
+              }
+              this.openProductDetail(product.id);
+            })
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)

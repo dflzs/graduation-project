@@ -83,6 +83,31 @@ export function buildGovernanceCenterAppealSubmitTitle(reason: string): string {
   return `针对“${reason}”补充新的说明和证据后，可在这里提交申诉。`;
 }
 
+export function buildGovernanceCenterRecordTitle(targetType: ModerationTargetType, reason: string): string {
+  const title = reason.trim();
+  const targetLabel = getGovernanceCenterTargetLabel(targetType);
+  if (title.length === 0) {
+    return targetLabel;
+  }
+  return `${targetLabel}：${title}`;
+}
+
+export function buildGovernanceCenterBadgeRecordTitle(label: string, reason: string): string {
+  const title = reason.trim();
+  if (title.length === 0) {
+    return label;
+  }
+  return `${label}：${title}`;
+}
+
+export function buildGovernanceCenterRecordDescription(description: string): string {
+  const normalized = description.trim();
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return '当前记录暂无补充说明，后续如有新进展会继续同步。';
+}
+
 export function buildGovernanceCenterPageTitle(): string {
   return '治理中心';
 }
@@ -160,6 +185,22 @@ export function buildGovernanceCenterReviewCommentPrefix(): string {
 
 export function buildGovernanceCenterReviewCommentText(comment: string): string {
   return `${buildGovernanceCenterReviewCommentPrefix()}${comment}`;
+}
+
+export function buildGovernanceCenterLinkedRecordMeta(recordTitle: string): string {
+  const normalized = recordTitle.trim();
+  if (normalized.length > 0) {
+    return `关联案件 ${normalized}`;
+  }
+  return '关联案件 当前治理记录';
+}
+
+export function buildGovernanceCenterAppealMetaSummary(
+  linkedRecordTitle: string,
+  createdAtText: string,
+  updatedAtText: string
+): string {
+  return `${buildGovernanceCenterLinkedRecordMeta(linkedRecordTitle)} / ${buildGovernanceCenterSubmittedMeta(createdAtText, updatedAtText)}`;
 }
 
 export function buildGovernanceCenterSubmittedMeta(createdAtText: string, updatedAtText: string): string {

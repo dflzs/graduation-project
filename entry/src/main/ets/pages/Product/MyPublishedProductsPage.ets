@@ -1,9 +1,12 @@
 ﻿import { pushUrlByContext, replaceUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
+import { chatRepository } from '../../repositories/chat.repo';
+import { orderRepository } from '../../repositories/order.repo';
+import { userRepository } from '../../repositories/user.repo';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
-import { Product, User } from '../../types/domain';
+import { ChatThreadRecord, Order, Product, User } from '../../types/domain';
 import {
   buildCampusTrustListSnippet,
   buildCampusTrustTonePalette,
@@ -20,6 +23,13 @@ import {
 import { openPublishEntry } from '../../utils/publish-entry';
 import { buildProductRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
+import {
+  buildSellerPublishedTradeSectionTitle,
+  buildSellerPublishedTradePrimaryActionLabel,
+  buildSellerPublishedTradeSecondaryActionLabel,
+  buildSellerPublishedTradeSummary,
+  buildSellerTradeCounterpartyText
+} from '../../utils/trade-progress-guidance';
 import { canViewTradeHistory, getMarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
@@ -219,6 +229,55 @@ struct MyPublishedProductsPage {
     return buildCampusTrustTonePalette(this.getCurrentUserTrustPresentation().tone).riskBadgeBackgroundColor;
   }
 
+  private getPublishedTradeOrder(item: Product): Order | null {
+    const currentUserId = this.currentUser?.id ?? '';
+    if (currentUserId.length === 0) {
+      return null;
+    }
+    return orderRepository.findLatestByProductAndUser(item.id, currentUserId);
+  }
+
+  private getPublishedTradeThread(item: Product, order: Order | null = this.getPublishedTradeOrder(item)): ChatThreadRecord | null {
+    if (!order) {
+      return null;
+    }
+    return chatRepository.findThreadByOrder(order);
+  }
+
+  private getPublishedTradeBuyerName(item: Product): string {
+    const order = this.getPublishedTradeOrder(item);
+    if (!order) {
+      return '';
+    }
+    return userRepository.getById(order.buyerId)?.nickname ?? '';
+  }
+
+  private openPublishedTradeOrder(item: Product): void {
+    const order = this.getPublishedTradeOrder(item);
+    if (!order) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Order/OrderDetailPage',
+      params: {
+        orderId: order.id,
+        source: 'my_published'
+      }
+    });
+  }
+
+  private openPublishedTradeThread(item: Product): void {
+    const order = this.getPublishedTradeOrder(item);
+    const thread = this.getPublishedTradeThread(item, order);
+    if (!thread) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Chat/ChatDetailPage',
+      params: { threadId: thread.id }
+    });
+  }
+
   @Builder
   private buildHeader(): void {
     Column({ space: 4 }) {
@@ -386,6 +445,58 @@ struct MyPublishedProductsPage {
         .width('100%')
         .fontSize(12)
         .fontColor('#8C867F')
+
+      if (this.getPublishedTradeOrder(item)) {
+        Column({ space: 8 }) {
+          Text(buildSellerPublishedTradeSectionTitle(this.getPublishedTradeOrder(item) as Order))
+            .width('100%')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(TITLE_COLOR)
+
+          Text(buildSellerPublishedTradeSummary(this.getPublishedTradeOrder(item) as Order))
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor(SUB_TEXT_COLOR)
+
+          Text(buildSellerTradeCounterpartyText(this.getPublishedTradeBuyerName(item)))
+            .width('100%')
+            .fontSize(12)
+            .fontColor('#6B655E')
+
+          Row({ space: 10 }) {
+            Button(buildSellerPublishedTradeSecondaryActionLabel(
+              this.getPublishedTradeOrder(item) as Order,
+              this.getPublishedTradeThread(item) !== null
+            ))
+              .layoutWeight(1)
+              .height(40)
+              .type(ButtonType.Normal)
+              .fontColor('#2F6BFF')
+              .backgroundColor('#E8F0FF')
+              .onClick(() => {
+                if (this.getPublishedTradeThread(item)) {
+                  this.openPublishedTradeThread(item);
+                  return;
+                }
+                this.openPublishedTradeOrder(item);
+              })
+
+            Button(buildSellerPublishedTradePrimaryActionLabel(this.getPublishedTradeOrder(item) as Order))
+              .layoutWeight(1)
+              .height(40)
+              .fontColor('#FFFFFF')
+              .backgroundColor('#2F6BFF')
+              .onClick(() => this.openPublishedTradeOrder(item))
+          }
+          .width('100%')
+        }
+        .width('100%')
+        .padding(12)
+        .backgroundColor('#F5F8FF')
+        .borderRadius(16)
+      }
     }
     .width('100%')
     .padding(16)

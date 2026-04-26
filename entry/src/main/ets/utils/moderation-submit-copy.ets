@@ -18,7 +18,7 @@ export function buildSubmitModerationPageTitle(targetType: ModerationTargetType)
 
 export function buildSubmitModerationReasonSuggestions(targetType: ModerationTargetType): string[] {
   if (targetType === 'chat_report') {
-    return ['辱骂骚扰', '恶意引导站外交易', '疑似诈骗'];
+    return ['言语骚扰辱骂', '恶意引导站外交易', '疑似诈骗'];
   }
   if (targetType === 'product_report') {
     return ['疑似虚假宣传', '疑似违禁商品', '商品信息涉嫌误导'];
@@ -102,4 +102,65 @@ export function buildSubmitAppealValidationMessage(kind: SubmitAppealValidationK
 
 export function buildSubmitAppealButtonLabel(isSubmitting: boolean): string {
   return isSubmitting ? '提交中...' : '提交申诉';
+}
+
+export function buildModerationEntryTitle(targetType: ModerationTargetType): string {
+  if (targetType === 'chat_report') {
+    return '会话举报';
+  }
+  if (targetType === 'product_report') {
+    return '商品举报';
+  }
+  if (targetType === 'user_report') {
+    return '用户举报';
+  }
+  return '订单投诉';
+}
+
+export function buildModerationEntryDescription(targetType: ModerationTargetType, subjectLabel?: string): string {
+  if (targetType === 'chat_report') {
+    return '如果这段沟通存在骚扰、恶意引流或疑似诈骗等情况，可以提交举报，平台会进入人工处理。';
+  }
+  if (targetType === 'product_report') {
+    return '如果该商品存在虚假描述、违禁风险或明显误导信息，可以提交举报，平台会进入人工处理。';
+  }
+  if (targetType === 'user_report') {
+    const target = subjectLabel ?? '用户';
+    return `如果这位${target}存在恶意引流、骚扰他人或违规倒卖等情况，可以提交举报，平台会进入人工处理。`;
+  }
+  return '如果这笔订单存在沟通失约、到场纠纷或异常交易情况，可以提交投诉，平台会进入人工处理。';
+}
+
+export function buildModerationEntryActionLabel(targetType: ModerationTargetType, subjectLabel?: string): string {
+  if (targetType === 'chat_report') {
+    return '举报会话';
+  }
+  if (targetType === 'product_report') {
+    return '举报商品';
+  }
+  if (targetType === 'user_report') {
+    return `举报${subjectLabel ?? '用户'}`;
+  }
+  return '提交投诉';
+}
+
+export function buildModerationTargetFallbackTitle(targetType: ModerationTargetType, subjectLabel?: string): string {
+  if (targetType === 'chat_report') {
+    return '当前会话';
+  }
+  if (targetType === 'product_report') {
+    return '当前商品';
+  }
+  if (targetType === 'user_report') {
+    return `当前${subjectLabel ?? '用户'}`;
+  }
+  return '当前订单';
+}
+
+export function buildSubmitModerationTargetTitle(targetType: ModerationTargetType, title: string): string {
+  const normalizedTitle = title.trim();
+  if (normalizedTitle.length > 0) {
+    return normalizedTitle;
+  }
+  return buildModerationTargetFallbackTitle(targetType);
 }

@@ -8,6 +8,7 @@ import {
   buildSubmitModerationReasonLabel,
   buildSubmitModerationReasonPlaceholder,
   buildSubmitModerationReasonSuggestions,
+  buildSubmitModerationTargetTitle,
   buildSubmitModerationValidationMessage
 } from '../../utils/moderation-submit-copy';
 import { backByContext, getParamsByContext, showToastByContext } from '../../utils/ui-context-actions';
@@ -39,7 +40,7 @@ struct SubmitModerationPage {
     const params = getParamsByContext<ModerationPageParams>(this);
     this.targetType = params?.targetType ?? 'order_complaint';
     this.targetId = params?.targetId ?? '';
-    this.title = params?.title ?? '举报与投诉';
+    this.title = buildSubmitModerationTargetTitle(this.targetType, params?.title ?? '');
     if (this.reason.length === 0) {
       const suggestions = buildSubmitModerationReasonSuggestions(this.targetType);
       this.reason = suggestions.length > 0 ? suggestions[0] : '';

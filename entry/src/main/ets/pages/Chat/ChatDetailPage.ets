@@ -1,11 +1,13 @@
 ﻿import { backByContext, getParamsByContext, pushUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
+import { ORDER_STATUS_TEXT } from '../../constants/config';
 import { CAMPUS_TRADE_QUICK_REPLIES } from '../../constants/message-quick-replies';
 import { replaceUrlByContext } from '../../utils/ui-context-actions';
 import { chatRepository } from '../../repositories/chat.repo';
+import { orderRepository } from '../../repositories/order.repo';
 import { productRepository } from '../../repositories/product.repo';
 import { userRepository } from '../../repositories/user.repo';
-import { ChatMessage, ChatThread, Product, ProductStatus, User } from '../../types/domain';
+import { ChatMessage, ChatThread, Order, Product, ProductStatus, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
 import {
   buildCampusTrustTonePalette,
@@ -24,6 +26,25 @@ import {
   getTradeRecordUnavailableTitle,
   shouldTreatTradeRecordAsAccessDenied
 } from '../../utils/trade-guard';
+import { buildModerationEntryActionLabel } from '../../utils/moderation-submit-copy';
+import { buildTradeChatQuickReplySuggestions } from '../../utils/handover-scheduling';
+import {
+  buildChatConversationSubtitle,
+  buildChatTradeProgressSectionTitle,
+  buildTradeProgressArrivalSummary,
+  buildTradeProgressInlineActionLabel,
+  buildTradeProgressNextStep,
+  buildTradeProgressStatusDescription,
+  resolveTradeProgressInlineAction
+} from '../../utils/trade-progress-guidance';
+import {
+  buildCampusTradeSafetyHeadline,
+  buildCampusTradeSafetyPrompts
+} from '../../utils/trade-safety-prompts';
+import {
+  buildTradeLinkedProductActionLabel,
+  buildTradeLinkedProductPrompt
+} from '../../utils/trade-cross-navigation';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -264,6 +285,91 @@ struct ChatDetailPage {
     });
   }
 
+  private openLinkedProductDetail(): void {
+    if (!this.product) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Product/ProductDetailPage',
+      params: { productId: this.product.id }
+    });
+  }
+
+  private getLinkedOrder(): Order | null {
+    return this.thread
+      ? orderRepository.findLatestByTradeContext(this.thread.productId, this.thread.buyerId, this.thread.sellerId)
+      : null;
+  }
+
+  private openLinkedOrderDetail(): void {
+    const linkedOrder = this.getLinkedOrder();
+    if (!linkedOrder) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Order/OrderDetailPage',
+      params: {
+        orderId: linkedOrder.id,
+        source: 'message'
+      }
+    });
+  }
+
+  private hasLinkedOrder(): boolean {
+    return this.getLinkedOrder() !== null && this.getCurrentUserId().length > 0;
+  }
+
+  private getLinkedOrderStatusLabel(): string {
+    const linkedOrder = this.getLinkedOrder();
+    return linkedOrder ? ORDER_STATUS_TEXT[linkedOrder.status] : '';
+  }
+
+  private getLinkedOrderStatusDescription(): string {
+    const linkedOrder = this.getLinkedOrder();
+    return linkedOrder ? buildTradeProgressStatusDescription(linkedOrder, this.getCurrentUserId()) : '';
+  }
+
+  private getLinkedOrderArrivalSummary(): string {
+    const linkedOrder = this.getLinkedOrder();
+    return linkedOrder ? buildTradeProgressArrivalSummary(linkedOrder) : '';
+  }
+
+  private getLinkedOrderNextStep(): string {
+    const linkedOrder = this.getLinkedOrder();
+    return linkedOrder ? buildTradeProgressNextStep(linkedOrder, this.getCurrentUserId()) : '';
+  }
+
+  private getLinkedOrderActionLabel(): string {
+    const linkedOrder = this.getLinkedOrder();
+    return linkedOrder ? buildTradeProgressInlineActionLabel(linkedOrder, this.getCurrentUserId()) : '查看订单详情';
+  }
+
+  private async handleLinkedOrderPrimaryAction(): Promise<void> {
+    const linkedOrder = this.getLinkedOrder();
+    const currentUserId = this.getCurrentUserId();
+    if (!linkedOrder || currentUserId.length === 0) {
+      return;
+    }
+
+    const action = resolveTradeProgressInlineAction(linkedOrder, currentUserId);
+    if (action === 'detail') {
+      this.openLinkedOrderDetail();
+      return;
+    }
+
+    let resultMessage = '';
+    if (action === 'pay') {
+      resultMessage = (await appContext.order.simulatePay(linkedOrder.id, currentUserId)).message;
+    } else if (action === 'arrive') {
+      resultMessage = (await appContext.order.markArrived(linkedOrder.id, currentUserId)).message;
+    } else {
+      resultMessage = (await appContext.order.completeOrder(linkedOrder.id, currentUserId)).message;
+    }
+
+    showToastByContext(this, { message: resultMessage, duration: 1200 });
+    void this.refresh();
+  }
+
   @Builder
   private buildEmptyState(): void {
     Column({ space: 12 }) {
@@ -389,7 +495,7 @@ struct ChatDetailPage {
           .fontColor('#8C867F')
 
         if (this.product && this.canCurrentUserSubmitModeration(this.product)) {
-          Button('举报会话')
+          Button(buildModerationEntryActionLabel('chat_report'))
             .width('100%')
             .height(40)
             .type(ButtonType.Normal)
@@ -399,6 +505,25 @@ struct ChatDetailPage {
             .border({ width: 1, color: '#E8D8B6' })
             .borderRadius(14)
             .onClick(() => this.openReportPage())
+        }
+
+        if (this.product) {
+          Text(buildTradeLinkedProductPrompt('chat'))
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor(SUB_TEXT_COLOR)
+
+          Button(buildTradeLinkedProductActionLabel())
+            .width('100%')
+            .height(40)
+            .type(ButtonType.Normal)
+            .fontSize(13)
+            .fontColor(PRIMARY_COLOR)
+            .backgroundColor('#E8F0FF')
+            .border({ width: 1, color: '#C9D8FF' })
+            .borderRadius(14)
+            .onClick(() => this.openLinkedProductDetail())
         }
       }
       .width('100%')
@@ -410,22 +535,125 @@ struct ChatDetailPage {
   }
 
   @Builder
-  private buildQuickReplies(): void {
-    Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row }) {
-      ForEach(CAMPUS_TRADE_QUICK_REPLIES, (item: string) => {
-        Text(item)
+  private buildTradeProgressCard(): void {
+    if (this.hasLinkedOrder()) {
+      Column({ space: 10 }) {
+        Row({ space: 8 }) {
+          Column({ space: 4 }) {
+            Text(buildChatTradeProgressSectionTitle(this.getLinkedOrder() as Order))
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(TITLE_COLOR)
+
+            Text(this.getLinkedOrderStatusDescription())
+              .width('100%')
+              .fontSize(12)
+              .lineHeight(18)
+              .fontColor(SUB_TEXT_COLOR)
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+
+          Text(this.getLinkedOrderStatusLabel())
+            .fontSize(11)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#2F6BFF')
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor('#E8F0FF')
+            .borderRadius(12)
+        }
+        .width('100%')
+
+        Text(this.getLinkedOrderArrivalSummary())
+          .width('100%')
+          .fontSize(12)
+          .fontColor('#5E5851')
+
+        Text(this.getLinkedOrderNextStep())
+          .width('100%')
+          .fontSize(13)
+          .lineHeight(20)
+          .fontColor('#4E4740')
+
+        Button(this.getLinkedOrderActionLabel())
+          .width('100%')
+          .height(40)
+          .type(ButtonType.Normal)
           .fontSize(13)
           .fontColor(PRIMARY_COLOR)
-          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .backgroundColor(this.isMessageComposerDisabled() ? '#F1ECE5' : '#E8F0FF')
-          .borderRadius(16)
-          .margin({ right: 8, bottom: 8 })
-          .opacity(this.isMessageComposerDisabled() ? 0.6 : 1)
-          .onClick(() => this.sendQuickReply(item))
-      }, (item: string) => item)
+          .backgroundColor('#E8F0FF')
+          .border({ width: 1, color: '#C9D8FF' })
+          .borderRadius(14)
+          .onClick(() => {
+            void this.handleLinkedOrderPrimaryAction();
+          })
+      }
+      .width('100%')
+      .padding(16)
+      .backgroundColor(CARD_BACKGROUND)
+      .borderRadius(20)
+      .margin({ left: 16, right: 16, top: 12 })
+    }
+  }
+
+  @Builder
+  private buildQuickReplies(): void {
+    Column({ space: 10 }) {
+      Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row }) {
+        ForEach(this.getTradeQuickReplies(), (item: string) => {
+          Text(item)
+            .fontSize(13)
+            .fontColor(PRIMARY_COLOR)
+            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+            .backgroundColor(this.isMessageComposerDisabled() ? '#F1ECE5' : '#E8F0FF')
+            .borderRadius(16)
+            .margin({ right: 8, bottom: 8 })
+            .opacity(this.isMessageComposerDisabled() ? 0.6 : 1)
+            .onClick(() => this.sendQuickReply(item))
+        }, (item: string) => item)
+      }
+      .width('100%')
+
+      Column({ space: 8 }) {
+        Text(buildCampusTradeSafetyHeadline('chat_coordination'))
+          .width('100%')
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(TITLE_COLOR)
+
+        ForEach(this.getTradeSafetyPrompts(), (tip: string) => {
+          Row({ space: 8 }) {
+            Text('·')
+              .fontSize(12)
+              .fontColor(SUB_TEXT_COLOR)
+
+            Text(tip)
+              .layoutWeight(1)
+              .fontSize(12)
+              .lineHeight(18)
+              .fontColor('#5E5851')
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+        }, (tip: string) => tip)
+      }
+      .width('100%')
+      .padding(14)
+      .backgroundColor(CARD_BACKGROUND)
+      .borderRadius(18)
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 6 })
+  }
+
+  private getTradeQuickReplies(): string[] {
+    const contextualReplies: string[] = this.product ? buildTradeChatQuickReplySuggestions(this.product.locationTag) : [];
+    const allReplies: string[] = [...contextualReplies, ...CAMPUS_TRADE_QUICK_REPLIES];
+    return allReplies.filter((item: string, index: number, list: string[]) => list.indexOf(item) === index);
+  }
+
+  private getTradeSafetyPrompts(): string[] {
+    return buildCampusTradeSafetyPrompts(this.product?.category ?? '其他', 'chat_coordination');
   }
 
   @Builder
@@ -469,7 +697,7 @@ struct ChatDetailPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(TITLE_COLOR)
 
-          Text('围绕当前商品继续沟通时间、地点和交易细节。')
+          Text(buildChatConversationSubtitle(this.getLinkedOrder()))
             .width('100%')
             .fontSize(13)
             .fontColor(SUB_TEXT_COLOR)
@@ -478,6 +706,7 @@ struct ChatDetailPage {
         .padding({ left: 16, right: 16, top: 16 })
 
         this.buildProductSummary()
+        this.buildTradeProgressCard()
         if (this.isReadOnlyConversation()) {
           Column({ space: 8 }) {
             Text('当前会话已切换为只读')

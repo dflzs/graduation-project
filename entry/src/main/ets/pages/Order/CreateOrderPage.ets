@@ -8,6 +8,15 @@ import {
   isProductOwnedByUser
 } from '../../utils/trade-guard';
 import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
+import {
+  HandoverTimeOption,
+  buildHandoverTimeOptions,
+  buildRecommendedHandoverNote
+} from '../../utils/handover-scheduling';
+import {
+  buildCampusTradeSafetyHeadline,
+  buildCampusTradeSafetyPrompts
+} from '../../utils/trade-safety-prompts';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -18,6 +27,7 @@ struct CreateOrderPage {
   @State productId: string = '';
   @State product: Product | null = null;
   @State address: string = '\u56fe\u4e66\u9986\u5927\u5385\uff0c\u5f53\u9762\u4ea4\u63a5';
+  @State selectedHandoverSlot: string = '';
   private productSyncUnsubscriber: (() => void) | null = null;
   private userSyncUnsubscribers: Array<() => void> = [];
 
@@ -56,12 +66,25 @@ struct CreateOrderPage {
   }
 
   private getHandoverTips(): string[] {
+    const productCategory: string = this.product?.category ?? '其他';
     return [
-      '\u5c3d\u91cf\u63d0\u524d\u548c\u5356\u5bb6\u786e\u8ba4\u89c1\u9762\u65f6\u95f4\uff0c\u51cf\u5c11\u6765\u56de\u7b49\u5f85\u3002',
-      '\u5efa\u8bae\u5728\u4eba\u6d41\u8f83\u591a\u7684\u6821\u56ed\u516c\u5171\u533a\u57df\u5b8c\u6210\u9762\u4ea4\uff0c\u66f4\u5b89\u5168\u4e5f\u66f4\u65b9\u4fbf\u3002',
-      '\u5982\u679c\u4e34\u65f6\u53d8\u66f4\u5730\u70b9\uff0c\u53ef\u4ee5\u5728\u8ba2\u5355\u8be6\u60c5\u91cc\u7ee7\u7eed\u6c9f\u901a\u5e76\u786e\u8ba4\u5230\u8fbe\u72b6\u6001\u3002',
+      ...buildCampusTradeSafetyPrompts(productCategory, 'create_order'),
       this.getLocationSafetyTip()
     ];
+  }
+
+  private getHandoverTimeOptions(): HandoverTimeOption[] {
+    return buildHandoverTimeOptions();
+  }
+
+  private getSelectedHandoverHelperText(): string {
+    const selectedOption = this.getHandoverTimeOptions().find((option: HandoverTimeOption) => option.key === this.selectedHandoverSlot);
+    return selectedOption ? selectedOption.helper : '';
+  }
+
+  private applyHandoverSlot(option: HandoverTimeOption): void {
+    this.selectedHandoverSlot = option.key;
+    this.address = buildRecommendedHandoverNote(this.getRecommendedTradeLocationLabel(), option.label);
   }
 
   aboutToAppear(): void {
@@ -163,6 +186,10 @@ struct CreateOrderPage {
       const cartItems = appContext.cart.listByUser(user.id)
         .filter((item) => item.productId === productId);
       cartItems.forEach((item) => appContext.cart.removeItem(user.id, item.id));
+      const toastMessage = result.message === '你已对该商品创建订单，已为你恢复到当前交易'
+        ? '已为你恢复到这件商品的当前订单'
+        : result.message;
+      showToastByContext(this, { message: toastMessage, duration: 1600 });
       replaceUrlByContext(this, {
         url: 'pages/Order/OrderDetailPage',
         params: { orderId: result.data?.id ?? '', source: 'create' }
@@ -266,6 +293,28 @@ struct CreateOrderPage {
                 .fontSize(13)
                 .fontColor('#6B655E')
 
+              Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row }) {
+                ForEach(this.getHandoverTimeOptions(), (option: HandoverTimeOption) => {
+                  Text(option.label)
+                    .fontSize(12)
+                    .fontColor(this.selectedHandoverSlot === option.key ? '#FFFFFF' : '#2F6BFF')
+                    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                    .backgroundColor(this.selectedHandoverSlot === option.key ? '#2F6BFF' : '#E8F0FF')
+                    .borderRadius(16)
+                    .margin({ right: 8, bottom: 8 })
+                    .onClick(() => this.applyHandoverSlot(option))
+                }, (option: HandoverTimeOption) => option.key)
+              }
+              .width('100%')
+
+              if (this.selectedHandoverSlot.length > 0) {
+                Text(this.getSelectedHandoverHelperText())
+                  .width('100%')
+                  .fontSize(12)
+                  .lineHeight(18)
+                  .fontColor('#8C867F')
+              }
+
               TextInput({ text: this.address, placeholder: '\u8bf7\u8f93\u5165\u89c1\u9762\u65f6\u95f4\u6216\u8865\u5145\u8bf4\u660e' })
                 .height(46)
                 .borderRadius(14)
@@ -280,7 +329,7 @@ struct CreateOrderPage {
             .borderRadius(18)
 
             Column({ space: 10 }) {
-              Text('\u4ea4\u6613\u63d0\u9192')
+              Text(buildCampusTradeSafetyHeadline('create_order'))
                 .width('100%')
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)

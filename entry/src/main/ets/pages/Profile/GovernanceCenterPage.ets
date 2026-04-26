@@ -24,13 +24,18 @@ import {
   buildGovernanceSummaryPresentation
 } from '../../utils/governance-summary-ui';
 import {
+  buildGovernanceCenterBadgeRecordTitle,
   buildGovernanceCenterAppealBadgeLabel,
   buildGovernanceCenterAppealButtonLabel,
   buildGovernanceCenterAppealEmptyState,
+  buildGovernanceCenterAppealMetaSummary,
   buildGovernanceCenterAppealSubmitTitle,
   buildGovernanceCenterErrorTitle,
+  buildGovernanceCenterLinkedRecordMeta,
   buildGovernanceCenterLoadingCopy,
   buildGovernanceCenterPageTitle,
+  buildGovernanceCenterRecordDescription,
+  buildGovernanceCenterRecordTitle,
   buildGovernanceCenterReviewCommentText,
   buildGovernanceCenterSectionTitle,
   buildGovernanceCenterSubmittedMeta,
@@ -193,6 +198,14 @@ struct GovernanceCenterPage {
 
   private getAppealTimelineSummary(record: AppealRecord): string {
     return buildAppealTimelineSummary(record);
+  }
+
+  private resolveLinkedModerationRecordTitle(record: AppealRecord): string {
+    const linkedRecord = this.moderationRecords.find((item: ModerationRecord) => item.id === record.moderationRecordId) ?? null;
+    if (linkedRecord === null) {
+      return '';
+    }
+    return buildGovernanceCenterRecordTitle(linkedRecord.targetType, linkedRecord.reason);
   }
 
   private openSubmitAppealPage(record: ModerationRecord): void {
@@ -381,13 +394,13 @@ struct GovernanceCenterPage {
       }
       .width('100%')
 
-      Text(record.reason)
+      Text(buildGovernanceCenterRecordTitle(record.targetType, record.reason))
         .width('100%')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text(record.description)
+      Text(buildGovernanceCenterRecordDescription(record.description))
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
@@ -442,13 +455,13 @@ struct GovernanceCenterPage {
       }
       .width('100%')
 
-      Text(record.reason)
+      Text(buildGovernanceCenterBadgeRecordTitle(buildGovernanceCenterAppealBadgeLabel(), record.reason))
         .width('100%')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text(record.description)
+      Text(buildGovernanceCenterRecordDescription(record.description))
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
@@ -469,9 +482,14 @@ struct GovernanceCenterPage {
           .fontColor('#8F877D')
       }
 
-      Text(buildGovernanceCenterSubmittedMeta(formatTime(record.createdAt), formatTime(record.updatedAt)))
+      Text(buildGovernanceCenterAppealMetaSummary(
+        this.resolveLinkedModerationRecordTitle(record),
+        formatTime(record.createdAt),
+        formatTime(record.updatedAt)
+      ))
         .width('100%')
         .fontSize(12)
+        .lineHeight(18)
         .fontColor('#8F877D')
     }
     .width('100%')

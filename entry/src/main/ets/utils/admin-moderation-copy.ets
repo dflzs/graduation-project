@@ -23,6 +23,7 @@ export type AdminModerationSummaryCardKind =
 
 export type AdminModerationDetailKind = 'moderation' | 'appeal';
 export type AdminModerationBadgeKind = 'moderation' | 'appeal';
+export type AdminModerationListMetaKind = 'moderation' | 'appeal';
 export type AdminModerationFactKind =
   | 'target_type'
   | 'status'
@@ -109,6 +110,22 @@ export function buildAdminModerationBadgeLabel(kind: AdminModerationBadgeKind): 
   return '治理记录';
 }
 
+export function buildAdminModerationRecordTitle(label: string, reason: string): string {
+  const summary = reason.trim();
+  if (summary.length === 0) {
+    return label;
+  }
+  return `${label}：${summary}`;
+}
+
+export function buildAdminModerationRecordDescription(description: string): string {
+  const normalized = description.trim();
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return '当前记录暂无补充说明，可结合事实区和处理结论继续判断。';
+}
+
 export function buildAdminModerationFactLabel(kind: AdminModerationFactKind): string {
   if (kind === 'status') {
     return '当前状态';
@@ -146,6 +163,33 @@ export function buildAdminModerationFactLabel(kind: AdminModerationFactKind): st
   return '记录类型';
 }
 
+export function buildAdminModerationFactValue(kind: AdminModerationFactKind, value: string | number): string {
+  if (kind === 'evidence_count') {
+    return `${value} 份`;
+  }
+  return `${value}`;
+}
+
+export function buildAdminModerationReferenceValue(primaryText: string, referenceId: string): string {
+  const primary = primaryText.trim();
+  const ref = referenceId.trim();
+  if (primary.length > 0 && ref.length > 0) {
+    return `${primary} · ${ref}`;
+  }
+  if (primary.length > 0) {
+    return primary;
+  }
+  return ref;
+}
+
+export function buildAdminModerationTargetReferenceValue(summaryText: string, targetId: string): string {
+  return buildAdminModerationReferenceValue(summaryText, targetId);
+}
+
+export function buildAdminModerationLinkedRecordReferenceValue(recordTitle: string, recordId: string): string {
+  return buildAdminModerationReferenceValue(recordTitle, recordId);
+}
+
 export function buildAdminModerationGuidanceTitle(kind: AdminModerationDetailKind): string {
   if (kind === 'appeal') {
     return '申诉结论与后续说明';
@@ -163,6 +207,17 @@ export function buildAdminModerationLinkedRecordMeta(recordId: string): string {
 
 export function buildAdminModerationUpdatedMeta(updatedText: string): string {
   return `更新时间 ${updatedText}`;
+}
+
+export function buildAdminModerationListMetaSummary(
+  kind: AdminModerationListMetaKind,
+  updatedText: string,
+  recordId?: string
+): string {
+  if (kind === 'appeal' && recordId !== undefined && recordId.length > 0) {
+    return `${buildAdminModerationLinkedRecordMeta(recordId)} / ${buildAdminModerationUpdatedMeta(updatedText)}`;
+  }
+  return buildAdminModerationUpdatedMeta(updatedText);
 }
 
 export function buildAdminModerationSelectionToast(kind: AdminModerationDetailKind): string {

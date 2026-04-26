@@ -1,5 +1,5 @@
 import { localDb } from '../data/db/local-db';
-import { ChatMessage, ChatThreadRecord } from '../types/domain';
+import { ChatMessage, ChatThreadRecord, Order } from '../types/domain';
 
 export class ChatRepository {
   listThreads(): ChatThreadRecord[] {
@@ -19,6 +19,20 @@ export class ChatRepository {
       && item.sellerId === sellerId
     );
     return thread ?? null;
+  }
+
+  findThreadByOrder(order: Order): ChatThreadRecord | null {
+    return this.findThread(order.productId, order.buyerId, order.sellerId);
+  }
+
+  findLatestThreadByProductAndUser(productId: string, userId: string): ChatThreadRecord | null {
+    const matched = localDb.getChatThreads()
+      .filter((item: ChatThreadRecord) =>
+        item.productId === productId
+        && (item.buyerId === userId || item.sellerId === userId)
+      )
+      .sort((a: ChatThreadRecord, b: ChatThreadRecord) => b.updatedAt - a.updatedAt);
+    return matched.length > 0 ? matched[0] : null;
   }
 
   saveThread(thread: ChatThreadRecord): ChatThreadRecord {

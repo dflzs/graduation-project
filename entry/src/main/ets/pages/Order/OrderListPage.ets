@@ -2,6 +2,7 @@
 import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { ORDER_STATUS_TEXT } from '../../constants/config';
+import { chatRepository } from '../../repositories/chat.repo';
 import { orderRepository } from '../../repositories/order.repo';
 import { productRepository } from '../../repositories/product.repo';
 import { Order, OrderStatus, Product, User } from '../../types/domain';
@@ -13,6 +14,14 @@ import {
 } from '../../utils/marketplace-audience-ui';
 import { buildOrderRenderKey } from '../../utils/render-keys';
 import { formatTime } from '../../utils/time';
+import { buildCompactHandoverSummary } from '../../utils/handover-scheduling';
+import {
+  buildOrderConversationActionLabel,
+  buildTradeProgressListArrivalMeta,
+  buildTradeProgressListPrimaryActionText,
+  buildTradeProgressListStatusSummary
+} from '../../utils/trade-progress-guidance';
+import { buildTradeLinkedProductCompactActionLabel } from '../../utils/trade-cross-navigation';
 import { canViewTradeHistory, getMarketplaceAudienceMode } from '../../utils/trade-guard';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
@@ -110,35 +119,19 @@ struct OrderListPage {
   }
 
   private getStatusSummary(order: Order): string {
-    if (order.status === OrderStatus.PENDING_PAYMENT) {
-      return '订单已创建，等待买家完成模拟支付。';
-    }
-    if (order.status === OrderStatus.PAID_SIMULATED) {
-      return '已完成模拟支付，等待双方到达约定地点。';
-    }
-    if (order.status === OrderStatus.READY_HANDOVER) {
-      return '双方都已到场，可以准备现场交接商品。';
-    }
-    if (order.status === OrderStatus.COMPLETED) {
-      return order.reviewed ? '交易与评价都已完成。' : '交易已完成，仍可补充本次评价。';
-    }
-    return '订单已取消，本次交易已经结束。';
+    return buildTradeProgressListStatusSummary(order);
   }
 
   private getPrimaryActionText(order: Order): string {
-    if (order.status === OrderStatus.PENDING_PAYMENT) {
-      return '去处理支付';
-    }
-    if (order.status === OrderStatus.PAID_SIMULATED) {
-      return '查看到达状态';
-    }
-    if (order.status === OrderStatus.READY_HANDOVER) {
-      return '去确认交接';
-    }
-    if (order.status === OrderStatus.COMPLETED) {
-      return order.reviewed ? '查看评价详情' : '去补充评价';
-    }
-    return '查看订单详情';
+    return buildTradeProgressListPrimaryActionText(order);
+  }
+
+  private getCompactHandoverSummary(order: Order): string {
+    return buildCompactHandoverSummary(order.locationTag, order.address);
+  }
+
+  private getArrivalMeta(order: Order): string {
+    return buildTradeProgressListArrivalMeta(order);
   }
 
   private getStatusColor(status: OrderStatus): string {
@@ -171,6 +164,35 @@ struct OrderListPage {
       return '#ECEAE7';
     }
     return '#F6E4E4';
+  }
+
+  private getConversationThreadId(order: Order): string {
+    return chatRepository.findThreadByOrder(order)?.id ?? '';
+  }
+
+  private openConversation(order: Order): void {
+    const threadId = this.getConversationThreadId(order);
+    if (threadId.length === 0) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Chat/ChatDetailPage',
+      params: { threadId }
+    });
+  }
+
+  private hasLinkedProduct(order: Order): boolean {
+    return productRepository.getById(order.productId) !== null;
+  }
+
+  private openLinkedProduct(order: Order): void {
+    if (!this.hasLinkedProduct(order)) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Product/ProductDetailPage',
+      params: { productId: order.productId }
+    });
   }
 
   @Builder
@@ -267,21 +289,51 @@ struct OrderListPage {
 
   @Builder
   private buildActionRow(order: Order): void {
-    Row({ space: 8 }) {
-      Text(this.getPrimaryActionText(order))
-        .layoutWeight(1)
-        .fontSize(12)
-        .fontColor('#8C867F')
+    Column({ space: 8 }) {
+      Row({ space: 8 }) {
+        Text(this.getPrimaryActionText(order))
+          .layoutWeight(1)
+          .fontSize(12)
+          .fontColor('#8C867F')
 
-      Button('查看详情')
-        .width(116)
-        .height(38)
-        .onClick(() => {
-          pushUrlByContext(this, { url: 'pages/Order/OrderDetailPage', params: { orderId: order.id, source: 'list' } });
-        })
+        if (this.getConversationThreadId(order).length > 0) {
+          Button(buildOrderConversationActionLabel(order))
+            .width(108)
+            .height(38)
+            .type(ButtonType.Normal)
+            .fontSize(13)
+            .fontColor('#2F6BFF')
+            .backgroundColor('#E8F0FF')
+            .border({ width: 1, color: '#D6E3FF' })
+            .onClick(() => this.openConversation(order))
+        }
+
+        Button('查看详情')
+          .width(116)
+          .height(38)
+          .onClick(() => {
+            pushUrlByContext(this, { url: 'pages/Order/OrderDetailPage', params: { orderId: order.id, source: 'list' } });
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.hasLinkedProduct(order)) {
+        Row() {
+          Blank()
+          Text(buildTradeLinkedProductCompactActionLabel())
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#6B655E')
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor('#F5F1EB')
+            .borderRadius(12)
+            .onClick(() => this.openLinkedProduct(order))
+        }
+        .width('100%')
+      }
     }
     .width('100%')
-    .alignItems(VerticalAlign.Center)
   }
 
   @Builder
@@ -346,11 +398,11 @@ struct OrderListPage {
         .lineHeight(20)
         .fontColor('#4E4740')
 
-      Text(`面交地点：${order.locationTag}`)
+      Text(this.getCompactHandoverSummary(order))
         .fontSize(13)
         .fontColor('#6B655E')
 
-      Text(`到达状态：买家${order.buyerArrived ? '已到达' : '未到达'} / 卖家${order.sellerArrived ? '已到达' : '未到达'}`)
+      Text(this.getArrivalMeta(order))
         .fontSize(13)
         .fontColor('#6B655E')
 

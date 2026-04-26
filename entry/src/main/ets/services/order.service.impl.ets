@@ -341,6 +341,18 @@ export class OrderServiceImpl implements OrderService {
     return this.finalizeCreatedOrder(order, product.title, '下单成功，商品已进入交易中');
   }
 
+  private reuseExistingActiveOrder(productId: string, buyerId: string): OperationResult<Order> | null {
+    const existingOrder = orderRepository.findLatestActiveByProductAndBuyer(productId, buyerId);
+    if (!existingOrder) {
+      return null;
+    }
+    return {
+      ok: true,
+      message: '你已对该商品创建订单，已为你恢复到当前交易',
+      data: existingOrder
+    };
+  }
+
   async createOrder(buyerId: string, productId: string, address: string): Promise<OperationResult<Order>> {
     if (address.trim().length === 0) {
       return { ok: false, message: '请填写收货地址或面交地点' };
@@ -355,11 +367,19 @@ export class OrderServiceImpl implements OrderService {
     }
 
     const product: Product | null = productRepository.getById(productId);
-    if (!product || product.isDeleted || product.status !== 'on_sale') {
+    if (!product || product.isDeleted) {
       return { ok: false, message: '商品不可购买' };
     }
     if (product.sellerId === buyerId) {
       return { ok: false, message: '不能购买自己发布的商品' };
+    }
+
+    const reusedOrder = this.reuseExistingActiveOrder(product.id, buyerId);
+    if (reusedOrder) {
+      return reusedOrder;
+    }
+    if (product.status !== 'on_sale') {
+      return { ok: false, message: '商品不可购买' };
     }
 
     const token = this.resolveRemoteCreateToken(buyerId);

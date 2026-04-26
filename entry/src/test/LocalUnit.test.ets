@@ -221,11 +221,16 @@ import {
   buildModerationTimelineSteps
 } from '../main/ets/utils/governance-timeline';
 import {
+  buildGovernanceCenterBadgeRecordTitle,
   buildGovernanceCenterAppealBadgeLabel,
   buildGovernanceCenterAppealEmptyState,
+  buildGovernanceCenterAppealMetaSummary,
   buildGovernanceCenterEntryActionLabel,
   buildGovernanceCenterAppealSubmitTitle,
+  buildGovernanceCenterLinkedRecordMeta,
+  buildGovernanceCenterRecordDescription,
   buildGovernanceCenterPageTitle,
+  buildGovernanceCenterRecordTitle,
   buildGovernanceCenterReviewCommentText,
   buildGovernanceCenterReviewCommentPrefix,
   buildGovernanceCenterSectionTitle,
@@ -237,6 +242,11 @@ import {
   getGovernanceCenterTargetLabel
 } from '../main/ets/utils/governance-center-copy';
 import {
+  buildModerationEntryActionLabel,
+  buildModerationEntryDescription,
+  buildModerationEntryTitle,
+  buildModerationTargetFallbackTitle,
+  buildSubmitModerationTargetTitle,
   buildSubmitAppealPageHeading,
   buildSubmitAppealReasonLabel,
   buildSubmitAppealDescriptionLabel,
@@ -279,6 +289,61 @@ import {
   MessageReminderTarget
 } from '../main/ets/utils/message-reminder-route';
 import {
+  buildCompactHandoverSummary,
+  buildHandoverStatusSummary,
+  buildHandoverTimeOptions,
+  buildRecommendedHandoverNote,
+  buildTradeChatQuickReplySuggestions
+} from '../main/ets/utils/handover-scheduling';
+import {
+  buildCampusTradeSafetyHeadline,
+  buildCampusTradeSafetyPrompts
+} from '../main/ets/utils/trade-safety-prompts';
+import {
+  buildTradeLinkedProductCompactActionLabel,
+  buildTradeLinkedProductActionLabel,
+  buildTradeLinkedProductPrompt
+} from '../main/ets/utils/trade-cross-navigation';
+import {
+  buildHomeProductConversationActionLabel,
+  buildHomeProductConversationHint,
+  buildHomeProductOwnerConversationHint,
+  buildHomeProductTradeActionLabel,
+  buildHomeProductTradeHint,
+  resolveHomeProductTradeAction
+} from '../main/ets/utils/home-trade-resume';
+import {
+  buildOrderConversationPrompt,
+  buildOrderConversationActionLabel,
+  buildChatConversationSubtitle,
+  buildChatTradeProgressSectionTitle,
+  buildProductTradeResumeDescription,
+  buildProductTradeResumePrimaryActionLabel,
+  buildProductTradeResumeSecondaryActionLabel,
+  buildProductTradeResumeSectionTitle,
+  buildProductTradeResumeTitle,
+  buildSellerOwnedProductTradeResumeDescription,
+  buildSellerOwnedProductTradeResumePrimaryActionLabel,
+  buildSellerOwnedProductTradeResumeSecondaryActionLabel,
+  buildSellerOwnedProductTradeResumeTitle,
+  buildSellerTradeCounterpartyText,
+  buildSellerPublishedTradeSectionTitle,
+  buildSellerPublishedTradePrimaryActionLabel,
+  buildSellerPublishedTradeSecondaryActionLabel,
+  buildSellerPublishedTradeSummary,
+  buildMessageThreadOrderActionLabel,
+  buildMessageThreadTradeSnapshot,
+  buildTradeProgressInlineActionLabel,
+  buildTradeProgressListArrivalMeta,
+  resolveTradeProgressInlineAction,
+  buildTradeProgressListPrimaryActionText,
+  buildTradeProgressListStatusSummary,
+  buildTradeProgressActionLabel,
+  buildTradeProgressArrivalSummary,
+  buildTradeProgressNextStep,
+  buildTradeProgressStatusDescription
+} from '../main/ets/utils/trade-progress-guidance';
+import {
   getAuthHeroSurfaceTone,
   getAuthInputSurfaceTone,
   getAuthSymmetricSplitButtonLayout,
@@ -311,9 +376,16 @@ import {
   buildAdminModerationErrorTitle,
   buildAdminModerationFactLabel,
   buildAdminModerationGuidanceTitle,
+  buildAdminModerationFactValue,
   buildAdminModerationHeaderDescription,
+  buildAdminModerationLinkedRecordReferenceValue,
   buildAdminModerationLinkedRecordMeta,
+  buildAdminModerationListMetaSummary,
   buildAdminModerationLoadingCopy,
+  buildAdminModerationReferenceValue,
+  buildAdminModerationTargetReferenceValue,
+  buildAdminModerationRecordDescription,
+  buildAdminModerationRecordTitle,
   buildAdminModerationReviewCommentText,
   buildAdminModerationSelectionToast,
   buildAdminModerationUpdatedMeta,
@@ -2924,6 +2996,536 @@ export default function localUnitTest() {
       expect(CAMPUS_TRADE_QUICK_REPLIES.includes('今晚方便面交吗？')).assertTrue();
       expect(CAMPUS_TRADE_QUICK_REPLIES.includes('可以在一食堂门口交易吗？')).assertTrue();
       expect(CAMPUS_TRADE_QUICK_REPLIES.includes('我大概十分钟后到。')).assertTrue();
+    });
+
+    it('handover_scheduling_helpers_should_build_structured_time_hints_and_chat_prompts', 0, () => {
+      const timeOptions = buildHandoverTimeOptions();
+      const recommendedNote = buildRecommendedHandoverNote('图书馆大厅', '今晚 18:00-19:00');
+      const chatReplies = buildTradeChatQuickReplySuggestions('图书馆大厅');
+      const summaryWithNote = buildHandoverStatusSummary('图书馆大厅', '建议今晚 18:00-19:00 在图书馆大厅当面交接');
+      const summaryFallback = buildHandoverStatusSummary('图书馆大厅', '');
+      const compactWithNote: string = buildCompactHandoverSummary(
+        '图书馆大厅',
+        '建议今晚 18:00-19:00 在图书馆大厅当面交接'
+      );
+      const compactFallback: string = buildCompactHandoverSummary('图书馆大厅', '');
+
+      expect(timeOptions.length >= 4).assertTrue();
+      expect(timeOptions[0].label).assertEqual('今晚 18:00-19:00');
+      expect(timeOptions[0].helper.length > 0).assertTrue();
+      expect(recommendedNote).assertEqual('建议今晚 18:00-19:00 在图书馆大厅当面交接');
+      expect(chatReplies[0]).assertEqual('今晚 18:00-19:00 方便在图书馆大厅面交吗？');
+      expect(chatReplies.length >= 3).assertTrue();
+      expect(summaryWithNote).assertEqual('当前约定：建议今晚 18:00-19:00 在图书馆大厅当面交接');
+      expect(summaryFallback).assertEqual('建议优先在图书馆大厅完成当面交接，并提前确认到场时间。');
+      expect(compactWithNote).assertEqual('面交安排：建议今晚 18:00-19:00 在图书馆大厅当面交接');
+      expect(compactFallback).assertEqual('面交安排：图书馆大厅');
+    });
+
+    it('trade_safety_prompts_should_match_category_and_trade_stage', 0, () => {
+      const productDetailPrompts: string[] = buildCampusTradeSafetyPrompts('电子数码', 'product_detail');
+      const orderCreatePrompts: string[] = buildCampusTradeSafetyPrompts('教材书籍', 'create_order');
+      const chatPrompts: string[] = buildCampusTradeSafetyPrompts('运动户外', 'chat_coordination');
+      const orderDetailPrompts: string[] = buildCampusTradeSafetyPrompts('其他', 'order_detail');
+
+      expect(buildCampusTradeSafetyHeadline('product_detail')).assertEqual('校园交易提醒');
+      expect(buildCampusTradeSafetyHeadline('create_order')).assertEqual('下单前提醒');
+      expect(buildCampusTradeSafetyHeadline('chat_coordination')).assertEqual('沟通提醒');
+      expect(buildCampusTradeSafetyHeadline('order_detail')).assertEqual('交接提醒');
+
+      expect(productDetailPrompts[0]).assertEqual('优先在校内公开区域当面沟通和验货，避免临时改到过于偏僻的位置。');
+      expect(productDetailPrompts[2]).assertEqual('数码商品建议现场开机、检查外观和主要功能，再确认完成交易。');
+
+      expect(orderCreatePrompts[2]).assertEqual('教材书籍建议核对版次、笔记划线和缺页情况，避免拿错版本。');
+      expect(chatPrompts[2]).assertEqual('运动户外类商品建议确认尺码、磨损和关键配件是否齐全。');
+      expect(orderDetailPrompts[2]).assertEqual('如现场情况与约定不符，可先暂停交易，并保留当前订单和聊天记录。');
+    });
+
+    it('trade_progress_guidance_should_describe_status_and_arrival_for_trade_views', 0, () => {
+      const pendingOrder: Order = {
+        id: 'progress-1',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 28,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.PENDING_PAYMENT,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 1
+      };
+      const readyOrder: Order = {
+        id: 'progress-2',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 28,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.READY_HANDOVER,
+        buyerArrived: true,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 1
+      };
+      const completedOrder: Order = {
+        id: 'progress-3',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 28,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.COMPLETED,
+        buyerArrived: true,
+        sellerArrived: true,
+        reviewed: true,
+        createdAt: 1,
+        updatedAt: 1
+      };
+      const canceledOrder: Order = {
+        id: 'progress-4',
+        productId: 'product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 28,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.CANCELED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 1
+      };
+
+      expect(buildTradeProgressStatusDescription(pendingOrder, 'buyer-1')).assertEqual(
+        '商品已为本次订单锁定，请先完成模拟支付，再继续安排线下面交。'
+      );
+      expect(buildTradeProgressListStatusSummary(pendingOrder)).assertEqual(
+        '订单已创建，等待买家完成模拟支付。'
+      );
+      expect(buildTradeProgressListPrimaryActionText(pendingOrder)).assertEqual('去处理支付');
+      expect(resolveTradeProgressInlineAction(pendingOrder, 'buyer-1')).assertEqual('pay');
+      expect(buildTradeProgressInlineActionLabel(pendingOrder, 'buyer-1')).assertEqual('完成模拟支付');
+      expect(buildTradeProgressNextStep(pendingOrder, 'seller-1')).assertEqual(
+        '下一步建议：等待买家支付后，再确认面交安排。'
+      );
+      expect(buildTradeProgressArrivalSummary(readyOrder)).assertEqual(
+        '到场进展：买家已到达，卖家未到达。'
+      );
+      expect(buildTradeProgressListStatusSummary(readyOrder)).assertEqual(
+        '双方都已到场，可以准备现场交接商品。'
+      );
+      expect(buildTradeProgressListArrivalMeta(readyOrder)).assertEqual(
+        '到达状态：买家已到达 / 卖家未到达'
+      );
+      expect(buildTradeProgressListPrimaryActionText(readyOrder)).assertEqual('去确认交接');
+      expect(resolveTradeProgressInlineAction(readyOrder, 'seller-1')).assertEqual('arrive');
+      expect(buildTradeProgressInlineActionLabel(readyOrder, 'seller-1')).assertEqual('确认我已到达');
+      expect(buildOrderConversationPrompt(readyOrder)).assertEqual(
+        '如果还需要确认到场位置、见面时间或临时变更，可以继续在聊天里同步。'
+      );
+      expect(buildTradeProgressNextStep(readyOrder, 'buyer-1')).assertEqual(
+        '下一步建议：你已到场，等待卖家到达后，当面验货并完成交接。'
+      );
+      expect(buildTradeProgressActionLabel(pendingOrder, 'buyer-1')).assertEqual('去订单详情完成支付');
+      expect(buildOrderConversationActionLabel(readyOrder)).assertEqual('继续沟通');
+      expect(buildOrderConversationActionLabel(completedOrder)).assertEqual('查看聊天记录');
+      expect(buildTradeProgressStatusDescription(completedOrder, 'seller-1')).assertEqual(
+        '本次交易已完成，你仍可以回看商品信息、聊天记录和本次评价。'
+      );
+      expect(buildTradeProgressListStatusSummary(completedOrder)).assertEqual(
+        '交易与评价都已完成，可回顾本次交易记录。'
+      );
+      expect(buildTradeProgressListArrivalMeta(completedOrder)).assertEqual(
+        '到场情况：双方均已完成本次面交。'
+      );
+      expect(buildTradeProgressListPrimaryActionText(completedOrder)).assertEqual('查看评价详情');
+      expect(buildOrderConversationPrompt(completedOrder)).assertEqual(
+        '这次交易已完成，你仍可以回看聊天记录、商品信息和评价内容。'
+      );
+      expect(buildChatConversationSubtitle(null)).assertEqual(
+        '围绕当前商品继续沟通时间、地点和交易细节。'
+      );
+      expect(buildChatConversationSubtitle(completedOrder)).assertEqual(
+        '这次交易已完成，你仍可以回看商品信息、聊天记录和本次交易记录。'
+      );
+      expect(buildChatConversationSubtitle(canceledOrder)).assertEqual(
+        '这次交易已结束，你仍可以回看原有沟通记录和商品信息。'
+      );
+      expect(buildMessageThreadTradeSnapshot(readyOrder)).assertEqual(
+        '当前订单：待交接 · 到场进展：买家已到达，卖家未到达。'
+      );
+      expect(buildMessageThreadTradeSnapshot(completedOrder)).assertEqual(
+        '当前订单：已完成 · 可回顾本次交易记录与评价内容。'
+      );
+      expect(buildMessageThreadTradeSnapshot(canceledOrder)).assertEqual(
+        '当前订单：已取消 · 可回看原有沟通记录。'
+      );
+      expect(buildChatTradeProgressSectionTitle(readyOrder)).assertEqual('交易进展');
+      expect(buildChatTradeProgressSectionTitle(completedOrder)).assertEqual('最近交易记录');
+      expect(buildChatTradeProgressSectionTitle(canceledOrder)).assertEqual('最近交易记录');
+      expect(buildMessageThreadOrderActionLabel(pendingOrder, 'buyer-1')).assertEqual('去支付');
+      expect(buildMessageThreadOrderActionLabel(pendingOrder, 'seller-1')).assertEqual('看支付');
+      expect(buildMessageThreadOrderActionLabel(completedOrder, 'seller-1')).assertEqual('看订单');
+      expect(buildProductTradeResumeTitle(pendingOrder, true)).assertEqual('你已发起本商品交易');
+      expect(buildProductTradeResumeDescription(pendingOrder, true, 'buyer-1')).assertEqual(
+        '订单已创建，等待买家完成模拟支付。 下一步建议：完成模拟支付后，和卖家确认面交时间。'
+      );
+      expect(buildProductTradeResumePrimaryActionLabel(pendingOrder, 'buyer-1')).assertEqual('去订单详情完成支付');
+      expect(buildProductTradeResumeSecondaryActionLabel(pendingOrder, true)).assertEqual('继续沟通');
+      expect(buildProductTradeResumeSecondaryActionLabel(pendingOrder, false)).assertEqual('查看当前订单');
+      expect(buildProductTradeResumeTitle(null, true)).assertEqual('你已和卖家建立沟通');
+      expect(buildProductTradeResumeDescription(null, true, 'buyer-1')).assertEqual(
+        '你已经和卖家建立沟通，可继续确认商品细节、面交时间和交易安排。'
+      );
+      expect(buildProductTradeResumeSectionTitle(pendingOrder)).assertEqual('当前交易进展');
+      expect(buildProductTradeResumeSectionTitle(completedOrder)).assertEqual('最近交易记录');
+      expect(buildProductTradeResumeSectionTitle(canceledOrder)).assertEqual('最近交易记录');
+      expect(buildProductTradeResumeTitle(completedOrder, true)).assertEqual('你已完成本商品交易');
+      expect(buildProductTradeResumeDescription(completedOrder, true, 'buyer-1')).assertEqual(
+        '这次交易已完成，你仍可以回看商品信息、聊天记录和评价内容。'
+      );
+      expect(buildProductTradeResumeTitle(canceledOrder, true)).assertEqual('这次商品交易已结束');
+      expect(buildProductTradeResumeDescription(canceledOrder, true, 'buyer-1')).assertEqual(
+        '这次交易已取消，你仍可以回看商品信息和聊天记录；如需再次购买，可重新和卖家确认。'
+      );
+      expect(buildProductTradeResumePrimaryActionLabel(null, 'buyer-1')).assertEqual('查看当前订单');
+      expect(buildProductTradeResumeSecondaryActionLabel(completedOrder, true)).assertEqual('查看聊天记录');
+      expect(buildProductTradeResumeSecondaryActionLabel(canceledOrder, true)).assertEqual('查看聊天记录');
+      expect(buildOrderConversationPrompt(canceledOrder)).assertEqual(
+        '这次交易已取消，你仍可以回看聊天记录和商品信息，必要时再重新确认是否继续交易。'
+      );
+      expect(buildTradeProgressListStatusSummary(canceledOrder)).assertEqual(
+        '订单已取消，本次交易已经结束，可回看原有沟通记录。'
+      );
+      expect(buildTradeProgressListArrivalMeta(canceledOrder)).assertEqual(
+        '履约状态：本次交易已取消，未再继续面交。'
+      );
+      expect(buildSellerPublishedTradeSummary(readyOrder)).assertEqual(
+        '双方都已到场，可以准备现场交接商品。 到场进展：买家已到达，卖家未到达。'
+      );
+      expect(buildSellerPublishedTradeSummary(completedOrder)).assertEqual(
+        '交易与评价都已完成，可回顾本次交易记录。 到场进展：双方均已到达。'
+      );
+      expect(buildSellerPublishedTradeSummary(canceledOrder)).assertEqual(
+        '订单已取消，本次交易已经结束，可回看原有沟通记录。'
+      );
+      expect(buildSellerPublishedTradeSectionTitle(readyOrder)).assertEqual('当前交易进展');
+      expect(buildSellerPublishedTradeSectionTitle(completedOrder)).assertEqual('最近交易记录');
+      expect(buildSellerPublishedTradeSectionTitle(canceledOrder)).assertEqual('最近交易记录');
+      expect(buildSellerPublishedTradePrimaryActionLabel(pendingOrder)).assertEqual('看支付');
+      expect(buildSellerPublishedTradeSecondaryActionLabel(completedOrder, true)).assertEqual('查看聊天记录');
+      expect(buildSellerPublishedTradeSecondaryActionLabel(pendingOrder, false)).assertEqual('查看订单详情');
+      expect(buildSellerTradeCounterpartyText('小王')).assertEqual('当前买家：小王');
+      expect(buildSellerTradeCounterpartyText('')).assertEqual('当前买家：校园用户');
+      expect(buildSellerOwnedProductTradeResumeTitle(readyOrder, true)).assertEqual('当前商品已有进行中的交易');
+      expect(buildSellerOwnedProductTradeResumeTitle(completedOrder, true)).assertEqual('当前商品最近一笔交易已完成');
+      expect(buildSellerOwnedProductTradeResumeTitle(canceledOrder, true)).assertEqual('当前商品最近一笔交易已结束');
+      expect(buildSellerOwnedProductTradeResumeTitle(null, true)).assertEqual('已有买家发起沟通');
+      expect(buildSellerOwnedProductTradeResumeDescription(readyOrder)).assertEqual(
+        '双方都已到场，可以准备现场交接商品。 到场进展：买家已到达，卖家未到达。'
+      );
+      expect(buildSellerOwnedProductTradeResumeDescription(completedOrder)).assertEqual(
+        '这次交易已完成，你仍可以回看商品信息、聊天记录和本次交易记录。'
+      );
+      expect(buildSellerOwnedProductTradeResumeDescription(canceledOrder)).assertEqual(
+        '这次交易已取消，你仍可以回看商品信息和聊天记录；如需继续转卖，可等待新的买家沟通。'
+      );
+      expect(buildSellerOwnedProductTradeResumePrimaryActionLabel(pendingOrder)).assertEqual('看支付');
+      expect(buildSellerOwnedProductTradeResumeSecondaryActionLabel(pendingOrder, true)).assertEqual('继续沟通');
+      expect(buildSellerOwnedProductTradeResumeSecondaryActionLabel(pendingOrder, false)).assertEqual('查看订单详情');
+      expect(resolveTradeProgressInlineAction(completedOrder, 'seller-1')).assertEqual('detail');
+      expect(buildTradeProgressInlineActionLabel(completedOrder, 'seller-1')).assertEqual('查看订单详情');
+      expect(buildTradeProgressArrivalSummary(completedOrder)).assertEqual(
+        '到场进展：双方均已到达。'
+      );
+    });
+
+    it('trade_cross_navigation_copy_should_describe_return_to_product_detail', 0, () => {
+      expect(buildTradeLinkedProductActionLabel()).assertEqual('查看商品详情');
+      expect(buildTradeLinkedProductCompactActionLabel()).assertEqual('看商品');
+      expect(buildTradeLinkedProductPrompt('chat')).assertEqual(
+        '需要重新确认商品图片、成色和发布说明时，可回到商品详情继续查看。'
+      );
+      expect(buildTradeLinkedProductPrompt('order')).assertEqual(
+        '如需再次核对商品发布说明、图片和地点标签，可回到商品详情查看。'
+      );
+    });
+
+    it('home_trade_resume_copy_should_describe_existing_conversation', 0, () => {
+      const pendingOrder: Order = {
+        id: 'home-order-pending',
+        productId: 'home-product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.PENDING_PAYMENT,
+        createdAt: 1713607200000,
+        updatedAt: 1713607200000,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false
+      };
+      const readyOrder: Order = {
+        id: 'home-order-ready',
+        productId: 'home-product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.READY_HANDOVER,
+        createdAt: 1713607200000,
+        updatedAt: 1713608200000,
+        buyerArrived: true,
+        sellerArrived: false,
+        reviewed: false
+      };
+      const completedOrder: Order = {
+        id: 'home-order-completed',
+        productId: 'home-product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.COMPLETED,
+        createdAt: 1713607200000,
+        updatedAt: 1713609200000,
+        buyerArrived: true,
+        sellerArrived: true,
+        reviewed: true
+      };
+      const canceledOrder: Order = {
+        id: 'home-order-canceled',
+        productId: 'home-product-1',
+        buyerId: 'buyer-1',
+        sellerId: 'seller-1',
+        amount: 88,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.CANCELED,
+        createdAt: 1713607200000,
+        updatedAt: 1713610200000,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false
+      };
+
+      expect(buildHomeProductConversationHint(true)).assertEqual('已沟通，可继续联系卖家。');
+      expect(buildHomeProductConversationHint(false)).assertEqual('');
+      expect(buildHomeProductConversationActionLabel()).assertEqual('继续沟通');
+      expect(buildHomeProductOwnerConversationHint('小王')).assertEqual('已有买家沟通 · 当前买家：小王');
+      expect(buildHomeProductOwnerConversationHint('')).assertEqual('已有买家沟通 · 当前买家：校园用户');
+        expect(buildHomeProductTradeHint(pendingOrder, 'buyer-1', '', false, true)).assertEqual(
+          '已有当前交易，待完成支付。'
+        );
+        expect(buildHomeProductTradeHint(readyOrder, 'buyer-1', '', false, true)).assertEqual(
+          '已有当前交易，可继续确认面交安排。'
+        );
+        expect(buildHomeProductTradeHint(completedOrder, 'buyer-1', '', false, true)).assertEqual(
+          '最近交易已完成，可回看沟通记录。'
+        );
+        expect(buildHomeProductTradeHint(canceledOrder, 'buyer-1', '', false, true)).assertEqual(
+          '上次交易已结束，可重新确认是否继续购买。'
+        );
+        expect(buildHomeProductTradeHint(readyOrder, 'seller-1', '小王', true, true)).assertEqual(
+          '已有当前交易 · 当前买家：小王'
+        );
+        expect(buildHomeProductTradeHint(completedOrder, 'seller-1', '小王', true, true)).assertEqual(
+          '最近交易已完成 · 最近买家：小王'
+        );
+        expect(buildHomeProductTradeActionLabel(pendingOrder, 'buyer-1', true)).assertEqual('去支付');
+        expect(buildHomeProductTradeActionLabel(pendingOrder, 'seller-1', true)).assertEqual('看支付');
+        expect(buildHomeProductTradeActionLabel(readyOrder, 'buyer-1', true)).assertEqual('继续沟通');
+      expect(buildHomeProductTradeActionLabel(completedOrder, 'buyer-1', true)).assertEqual('查看聊天记录');
+      expect(buildHomeProductTradeActionLabel(canceledOrder, 'buyer-1', false)).assertEqual('看订单');
+      expect(resolveHomeProductTradeAction(pendingOrder, 'buyer-1', true)).assertEqual('order');
+      expect(resolveHomeProductTradeAction(readyOrder, 'buyer-1', true)).assertEqual('chat');
+      expect(resolveHomeProductTradeAction(completedOrder, 'buyer-1', false)).assertEqual('order');
+      expect(resolveHomeProductTradeAction(null, 'buyer-1', false)).assertEqual('detail');
+    });
+
+    it('chat_repository_should_find_thread_by_order', 0, () => {
+      const order: Order = {
+        id: 'chat-order-1',
+        productId: 'chat-product-1',
+        buyerId: 'chat-buyer-1',
+        sellerId: 'chat-seller-1',
+        amount: 66,
+        address: '图书馆大厅',
+        locationTag: '图书馆大厅',
+        payType: 'simulated',
+        status: OrderStatus.PAID_SIMULATED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 1
+      };
+
+      chatRepository.saveThread({
+        id: 'chat-thread-order-1',
+        productId: order.productId,
+        buyerId: order.buyerId,
+        sellerId: order.sellerId,
+        createdAt: 1,
+        updatedAt: 2
+      });
+
+      expect(chatRepository.findThreadByOrder(order)?.id).assertEqual('chat-thread-order-1');
+    });
+
+    it('chat_repository_should_find_latest_thread_by_product_and_user', 0, () => {
+      chatRepository.saveThread({
+        id: 'chat-thread-old',
+        productId: 'resume-product-1',
+        buyerId: 'resume-user-1',
+        sellerId: 'resume-seller-1',
+        createdAt: 1,
+        updatedAt: 2
+      });
+      chatRepository.saveThread({
+        id: 'chat-thread-new',
+        productId: 'resume-product-1',
+        buyerId: 'resume-user-1',
+        sellerId: 'resume-seller-1',
+        createdAt: 3,
+        updatedAt: 4
+      });
+
+      expect(chatRepository.findLatestThreadByProductAndUser('resume-product-1', 'resume-user-1')?.id)
+        .assertEqual('chat-thread-new');
+    });
+
+    it('order_repository_should_find_latest_order_by_trade_context', 0, () => {
+      orderRepository.save({
+        id: 'thread-order-old',
+        productId: 'thread-product-1',
+        buyerId: 'thread-buyer-1',
+        sellerId: 'thread-seller-1',
+        amount: 45,
+        address: '一食堂门口',
+        locationTag: '一食堂门口',
+        payType: 'simulated',
+        status: OrderStatus.PAID_SIMULATED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      orderRepository.save({
+        id: 'thread-order-new',
+        productId: 'thread-product-1',
+        buyerId: 'thread-buyer-1',
+        sellerId: 'thread-seller-1',
+        amount: 45,
+        address: '一食堂门口',
+        locationTag: '一食堂门口',
+        payType: 'simulated',
+        status: OrderStatus.READY_HANDOVER,
+        buyerArrived: true,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 3,
+        updatedAt: 4
+      });
+
+      expect(orderRepository.findLatestByTradeContext('thread-product-1', 'thread-buyer-1', 'thread-seller-1')?.id)
+        .assertEqual('thread-order-new');
+    });
+
+    it('order_repository_should_find_latest_order_by_product_and_user', 0, () => {
+      orderRepository.save({
+        id: 'product-order-old',
+        productId: 'resume-product-order-1',
+        buyerId: 'resume-user-2',
+        sellerId: 'resume-seller-2',
+        amount: 45,
+        address: '一食堂门口',
+        locationTag: '一食堂门口',
+        payType: 'simulated',
+        status: OrderStatus.PENDING_PAYMENT,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      orderRepository.save({
+        id: 'product-order-new',
+        productId: 'resume-product-order-1',
+        buyerId: 'resume-user-2',
+        sellerId: 'resume-seller-2',
+        amount: 45,
+        address: '一食堂门口',
+        locationTag: '一食堂门口',
+        payType: 'simulated',
+        status: OrderStatus.PAID_SIMULATED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 3,
+        updatedAt: 4
+      });
+
+      expect(orderRepository.findLatestByProductAndUser('resume-product-order-1', 'resume-user-2')?.id)
+        .assertEqual('product-order-new');
+    });
+
+    it('order_repository_should_find_latest_active_order_by_product_and_buyer', 0, () => {
+      orderRepository.save({
+        id: 'product-order-canceled',
+        productId: 'resume-active-order-1',
+        buyerId: 'resume-buyer-3',
+        sellerId: 'resume-seller-3',
+        amount: 45,
+        address: '一食堂门口',
+        locationTag: '一食堂门口',
+        payType: 'simulated',
+        status: OrderStatus.CANCELED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 1,
+        updatedAt: 2
+      });
+      orderRepository.save({
+        id: 'product-order-active',
+        productId: 'resume-active-order-1',
+        buyerId: 'resume-buyer-3',
+        sellerId: 'resume-seller-3',
+        amount: 45,
+        address: '一食堂门口',
+        locationTag: '一食堂门口',
+        payType: 'simulated',
+        status: OrderStatus.PAID_SIMULATED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: 3,
+        updatedAt: 4
+      });
+
+      expect(orderRepository.findLatestActiveByProductAndBuyer('resume-active-order-1', 'resume-buyer-3')?.id)
+        .assertEqual('product-order-active');
     });
 
     it('verification_code_helpers_should_normalize_and_split_code_for_slot_input', 0, () => {
@@ -6123,12 +6725,30 @@ export default function localUnitTest() {
       expect(buildGovernanceCenterReviewCommentText('平台已收到补充材料')).assertEqual(
         '处理备注：平台已收到补充材料'
       );
+      expect(buildGovernanceCenterLinkedRecordMeta('商品举报：疑似虚假宣传')).assertEqual(
+        '关联案件 商品举报：疑似虚假宣传'
+      );
+      expect(buildGovernanceCenterLinkedRecordMeta('')).assertEqual('关联案件 当前治理记录');
+      expect(buildGovernanceCenterAppealMetaSummary('商品举报：疑似虚假宣传', '昨天 10:00', '今天 09:00')).assertEqual(
+        '关联案件 商品举报：疑似虚假宣传 / 提交于 昨天 10:00 / 最近更新 今天 09:00'
+      );
+      expect(buildGovernanceCenterAppealMetaSummary('', '昨天 10:00', '今天 09:00')).assertEqual(
+        '关联案件 当前治理记录 / 提交于 昨天 10:00 / 最近更新 今天 09:00'
+      );
       expect(buildGovernanceCenterSubmittedMeta('昨天 10:00', '今天 09:00')).assertEqual(
         '提交于 昨天 10:00 / 最近更新 今天 09:00'
       );
       expect(buildGovernanceCenterAppealSubmitTitle('恶意爽约')).assertEqual(
         '针对“恶意爽约”补充新的说明和证据后，可在这里提交申诉。'
       );
+      expect(buildGovernanceCenterRecordTitle('product_report', '疑似虚假宣传')).assertEqual(
+        '商品举报：疑似虚假宣传'
+      );
+      expect(buildGovernanceCenterRecordTitle('order_complaint', '')).assertEqual('订单投诉');
+      expect(buildGovernanceCenterBadgeRecordTitle('申诉记录', '补充新证据')).assertEqual('申诉记录：补充新证据');
+      expect(buildGovernanceCenterBadgeRecordTitle('申诉记录', '')).assertEqual('申诉记录');
+      expect(buildGovernanceCenterRecordDescription('补充上传新的聊天截图')).assertEqual('补充上传新的聊天截图');
+      expect(buildGovernanceCenterRecordDescription('')).assertEqual('当前记录暂无补充说明，后续如有新进展会继续同步。');
     });
 
     it('moderation_submit_copy_should_build_clean_titles_and_validation_messages', 0, () => {
@@ -6144,6 +6764,24 @@ export default function localUnitTest() {
       expect(buildSubmitAppealReasonLabel()).assertEqual('申诉原因');
       expect(buildSubmitAppealDescriptionLabel()).assertEqual('申诉说明');
       expect(buildSubmitAppealValidationMessage('description')).assertEqual('请补充更具体的申诉说明');
+    });
+
+    it('moderation_submit_copy_should_build_consistent_entry_copy', 0, () => {
+      expect(buildModerationEntryTitle('order_complaint')).assertEqual('订单投诉');
+      expect(buildModerationEntryDescription('order_complaint')).assertEqual(
+        '如果这笔订单存在沟通失约、到场纠纷或异常交易情况，可以提交投诉，平台会进入人工处理。'
+      );
+      expect(buildModerationEntryActionLabel('order_complaint')).assertEqual('提交投诉');
+      expect(buildModerationEntryActionLabel('chat_report')).assertEqual('举报会话');
+      expect(buildModerationEntryActionLabel('product_report')).assertEqual('举报商品');
+      expect(buildModerationEntryActionLabel('user_report', '卖家')).assertEqual('举报卖家');
+      expect(buildModerationEntryDescription('user_report', '卖家')).assertEqual(
+        '如果这位卖家存在恶意引流、骚扰他人或违规倒卖等情况，可以提交举报，平台会进入人工处理。'
+      );
+      expect(buildModerationTargetFallbackTitle('order_complaint')).assertEqual('当前订单');
+      expect(buildModerationTargetFallbackTitle('user_report', '卖家')).assertEqual('当前卖家');
+      expect(buildSubmitModerationTargetTitle('product_report', '高数教材')).assertEqual('高数教材');
+      expect(buildSubmitModerationTargetTitle('order_complaint', '')).assertEqual('当前订单');
     });
 
     it('admin_navigation_should_expose_clean_dashboard_entries', 0, () => {
@@ -7529,13 +8167,35 @@ export default function localUnitTest() {
 
     it('admin_moderation_copy_should_build_detail_copy_and_toasts', 0, () => {
       expect(buildAdminModerationBadgeLabel('appeal')).assertEqual('申诉记录');
+      expect(buildAdminModerationRecordTitle('商品举报', '疑似虚假宣传')).assertEqual('商品举报：疑似虚假宣传');
+      expect(buildAdminModerationRecordTitle('申诉记录', '')).assertEqual('申诉记录');
+      expect(buildAdminModerationRecordDescription('平台已核实主要事实')).assertEqual('平台已核实主要事实');
+      expect(buildAdminModerationRecordDescription('')).assertEqual('当前记录暂无补充说明，可结合事实区和处理结论继续判断。');
       expect(buildAdminModerationFactLabel('reporter')).assertEqual('举报人');
       expect(buildAdminModerationFactLabel('linked_record')).assertEqual('关联治理记录');
+      expect(buildAdminModerationFactValue('evidence_count', 2)).assertEqual('2 份');
+      expect(buildAdminModerationFactValue('evidence_count', 0)).assertEqual('0 份');
+      expect(buildAdminModerationFactValue('target_id', 'order-1')).assertEqual('order-1');
+      expect(buildAdminModerationReferenceValue('小王', 'user-1')).assertEqual('小王 · user-1');
+      expect(buildAdminModerationReferenceValue('', 'user-1')).assertEqual('user-1');
+      expect(buildAdminModerationReferenceValue('小王', '')).assertEqual('小王');
+      expect(buildAdminModerationTargetReferenceValue('高数教材', 'product-1')).assertEqual('高数教材 · product-1');
+      expect(buildAdminModerationTargetReferenceValue('', 'product-1')).assertEqual('product-1');
       expect(buildAdminModerationGuidanceTitle('moderation')).assertEqual('处理结论与恢复条件');
       expect(buildAdminModerationGuidanceTitle('appeal')).assertEqual('申诉结论与后续说明');
       expect(buildAdminModerationReviewCommentText('处理中说明')).assertEqual('当前处理备注：处理中说明');
       expect(buildAdminModerationLinkedRecordMeta('mod-1')).assertEqual('关联治理记录 mod-1');
+      expect(buildAdminModerationLinkedRecordReferenceValue('订单投诉：爽约未到场', 'mod-1')).assertEqual(
+        '订单投诉：爽约未到场 · mod-1'
+      );
+      expect(buildAdminModerationLinkedRecordReferenceValue('', 'mod-1')).assertEqual('mod-1');
       expect(buildAdminModerationUpdatedMeta('2026-04-15 20:30')).assertEqual('更新时间 2026-04-15 20:30');
+      expect(buildAdminModerationListMetaSummary('moderation', '2026-04-15 20:30')).assertEqual(
+        '更新时间 2026-04-15 20:30'
+      );
+      expect(buildAdminModerationListMetaSummary('appeal', '2026-04-15 20:30', 'mod-1')).assertEqual(
+        '关联治理记录 mod-1 / 更新时间 2026-04-15 20:30'
+      );
       expect(buildAdminModerationSelectionToast('moderation')).assertEqual('请先选择一条治理记录');
       expect(buildAdminModerationSelectionToast('appeal')).assertEqual('请先选择一条申诉记录');
     });
@@ -10260,6 +10920,80 @@ export default function localUnitTest() {
       expect(result.data?.id.includes('order')).assertTrue();
       expect(orderRepository.getById(result.data!.id)?.buyerId).assertEqual(buyer.id);
       expect(productRepository.getById(product.id)?.status).assertEqual('locked');
+    });
+
+    it('order_service_should_reuse_existing_active_order_for_same_buyer_and_product', 0, async () => {
+      const now = Date.now();
+      const seller: User = {
+        id: 'existing-order-seller',
+        phone: '18830003012',
+        nickname: '复用订单卖家',
+        role: 'user',
+        status: 'active',
+        creditScore: 90,
+        createdAt: now,
+        updatedAt: now
+      };
+      const buyer: User = {
+        id: 'existing-order-buyer',
+        phone: '18830003011',
+        nickname: '复用订单买家',
+        role: 'user',
+        status: 'active',
+        creditScore: 88,
+        createdAt: now,
+        updatedAt: now
+      };
+      const product: Product = {
+        id: 'product-existing-order',
+        sellerId: seller.id,
+        title: '重复下单复用测试商品',
+        desc: '已有未结束订单时应直接返回现有订单',
+        price: 42,
+        category: '教材书籍',
+        images: [],
+        locationTag: '教学楼大厅',
+        status: 'locked',
+        isDeleted: false,
+        createdAt: now,
+        updatedAt: now
+      };
+      const existingOrder: Order = {
+        id: 'existing-order-1',
+        productId: product.id,
+        buyerId: buyer.id,
+        sellerId: seller.id,
+        amount: product.price,
+        address: '教学楼大厅面交',
+        locationTag: product.locationTag,
+        payType: 'simulated',
+        status: OrderStatus.PAID_SIMULATED,
+        buyerArrived: false,
+        sellerArrived: false,
+        reviewed: false,
+        createdAt: now + 1,
+        updatedAt: now + 2
+      };
+      userRepository.save(seller);
+      userRepository.save(buyer);
+      productRepository.save(product);
+      orderRepository.save(existingOrder);
+
+      const stateService = new AuthStateService(createMemoryPersistenceAdapter());
+      stateService.saveSession({
+        currentUser: buyer,
+        token: 'remote-order-token-reuse',
+        expiresAt: now + 60_000
+      });
+
+      const fakeRemoteClient = new FakeRemoteOrderClient();
+      const service = new OrderServiceImpl(fakeRemoteClient, stateService);
+      const result = await service.createOrder(buyer.id, product.id, '教学楼大厅面交');
+
+      expect(result.ok).assertTrue();
+      expect(result.data?.id).assertEqual(existingOrder.id);
+      expect(result.message).assertEqual('你已对该商品创建订单，已为你恢复到当前交易');
+      expect(fakeRemoteClient.createOrderCalled).assertFalse();
     });
 
     it('order_service_should_hydrate_local_cache_from_remote_order_list', 0, async () => {

@@ -1,12 +1,15 @@
 import { backByContext, getParamsByContext, pushUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
+import { chatRepository } from '../../repositories/chat.repo';
+import { orderRepository } from '../../repositories/order.repo';
 import { userRepository } from '../../repositories/user.repo';
-import { Product, User } from '../../types/domain';
+import { ChatThreadRecord, Order, Product, User } from '../../types/domain';
 import { formatTime } from '../../utils/time';
 import {
   canCurrentUserJoinTrade,
   canShowProductDetailContactAction,
   canUserTradeProduct,
+  canViewTradeHistory,
   getProductDetailTradeHint,
   getTradeEntryDeniedMessage,
   isProductOwnedByUser
@@ -17,6 +20,26 @@ import {
   CampusTrustPresentation
 } from '../../utils/campus-trust-ui';
 import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
+import { buildModerationEntryActionLabel, buildModerationTargetFallbackTitle } from '../../utils/moderation-submit-copy';
+import {
+  buildOrderConversationActionLabel,
+  buildProductTradeResumeDescription,
+  buildProductTradeResumePrimaryActionLabel,
+  buildProductTradeResumeSecondaryActionLabel,
+  buildProductTradeResumeSectionTitle,
+  buildProductTradeResumeTitle,
+  buildSellerPublishedTradeSectionTitle,
+  buildSellerOwnedProductTradeResumeDescription,
+  buildSellerOwnedProductTradeResumePrimaryActionLabel,
+  buildSellerOwnedProductTradeResumeSecondaryActionLabel,
+  buildSellerOwnedProductTradeResumeTitle,
+  buildSellerTradeCounterpartyText,
+  buildTradeProgressActionLabel
+} from '../../utils/trade-progress-guidance';
+import {
+  buildCampusTradeSafetyHeadline,
+  buildCampusTradeSafetyPrompts
+} from '../../utils/trade-safety-prompts';
 
 const PRODUCT_PARAM_INVALID_TEXT: string = '\u5546\u54c1\u53c2\u6570\u65e0\u6548';
 const PRODUCT_LOAD_FAILED_TEXT: string = '\u5546\u54c1\u4e0d\u5b58\u5728\u6216\u52a0\u8f7d\u5931\u8d25';
@@ -329,6 +352,221 @@ struct ProductDetailPage {
     return canUserTradeProduct(product, currentUser?.id ?? '', currentUser?.role, currentUser?.status ?? 'active');
   }
 
+  private getCurrentUser(): User | null {
+    return appContext.getCurrentUser();
+  }
+
+  private getCurrentUserId(): string {
+    return this.getCurrentUser()?.id ?? '';
+  }
+
+  private getExistingTradeThread(product: Product): ChatThreadRecord | null {
+    const currentUser = this.getCurrentUser();
+    if (!currentUser || !canViewTradeHistory(currentUser) || isProductOwnedByUser(product, currentUser.id)) {
+      return null;
+    }
+    return chatRepository.findLatestThreadByProductAndUser(product.id, currentUser.id);
+  }
+
+  private getExistingTradeOrder(product: Product): Order | null {
+    const currentUser = this.getCurrentUser();
+    if (!currentUser || !canViewTradeHistory(currentUser) || isProductOwnedByUser(product, currentUser.id)) {
+      return null;
+    }
+    return orderRepository.findLatestByProductAndUser(product.id, currentUser.id);
+  }
+
+  private getSellerOwnedTradeThread(product: Product): ChatThreadRecord | null {
+    const currentUser = this.getCurrentUser();
+    if (!currentUser || !canViewTradeHistory(currentUser) || !isProductOwnedByUser(product, currentUser.id)) {
+      return null;
+    }
+    return chatRepository.findLatestThreadByProductAndUser(product.id, currentUser.id);
+  }
+
+  private getSellerOwnedTradeOrder(product: Product): Order | null {
+    const currentUser = this.getCurrentUser();
+    if (!currentUser || !canViewTradeHistory(currentUser) || !isProductOwnedByUser(product, currentUser.id)) {
+      return null;
+    }
+    return orderRepository.findLatestByProductAndUser(product.id, currentUser.id);
+  }
+
+  private getSellerOwnedTradeBuyerName(product: Product): string {
+    const linkedOrder = this.getSellerOwnedTradeOrder(product);
+    if (!linkedOrder) {
+      return '';
+    }
+    return userRepository.getById(linkedOrder.buyerId)?.nickname ?? '';
+  }
+
+  private shouldShowTradeResumeCard(product: Product): boolean {
+    return this.getExistingTradeThread(product) !== null || this.getExistingTradeOrder(product) !== null;
+  }
+
+  private getTradeResumeTitle(product: Product): string {
+    return buildProductTradeResumeTitle(this.getExistingTradeOrder(product), this.getExistingTradeThread(product) !== null);
+  }
+
+  private getTradeResumeDescription(product: Product): string {
+    return buildProductTradeResumeDescription(
+      this.getExistingTradeOrder(product),
+      this.getExistingTradeThread(product) !== null,
+      this.getCurrentUserId()
+    );
+  }
+
+  private shouldUseTradeResumeBottomBar(product: Product): boolean {
+    return this.getExistingTradeOrder(product) !== null;
+  }
+
+  private shouldShowSellerOwnedTradeResumeCard(product: Product): boolean {
+    return this.getSellerOwnedTradeOrder(product) !== null || this.getSellerOwnedTradeThread(product) !== null;
+  }
+
+  private shouldUseSellerOwnedTradeBottomBar(product: Product): boolean {
+    return this.getSellerOwnedTradeOrder(product) !== null;
+  }
+
+  private getDetailHint(product: Product): string {
+    if (isProductOwnedByUser(product, appContext.getCurrentUser()?.id ?? '')) {
+      if (this.shouldUseSellerOwnedTradeBottomBar(product)) {
+        return buildSellerOwnedProductTradeResumeDescription(this.getSellerOwnedTradeOrder(product));
+      }
+      return getSelfOwnedHintText();
+    }
+    if (this.shouldUseTradeResumeBottomBar(product)) {
+      return this.getTradeResumeDescription(product);
+    }
+    return getProductDetailTradeHint(product, appContext.getCurrentUser());
+  }
+
+  private getTradeResumeBottomSecondaryLabel(product: Product): string {
+    return buildProductTradeResumeSecondaryActionLabel(
+      this.getExistingTradeOrder(product),
+      this.getExistingTradeThread(product) !== null
+    );
+  }
+
+  private getTradeResumeBottomPrimaryLabel(product: Product): string {
+    return buildProductTradeResumePrimaryActionLabel(this.getExistingTradeOrder(product), this.getCurrentUserId());
+  }
+
+  private getSellerOwnedTradeResumeTitle(product: Product): string {
+    return buildSellerOwnedProductTradeResumeTitle(
+      this.getSellerOwnedTradeOrder(product),
+      this.getSellerOwnedTradeThread(product) !== null
+    );
+  }
+
+  private getSellerOwnedTradeResumeDescription(product: Product): string {
+    return buildSellerOwnedProductTradeResumeDescription(this.getSellerOwnedTradeOrder(product));
+  }
+
+  private getSellerOwnedTradeBottomSecondaryLabel(product: Product): string {
+    return buildSellerOwnedProductTradeResumeSecondaryActionLabel(
+      this.getSellerOwnedTradeOrder(product),
+      this.getSellerOwnedTradeThread(product) !== null
+    );
+  }
+
+  private getSellerOwnedTradeBottomPrimaryLabel(product: Product): string {
+    const order = this.getSellerOwnedTradeOrder(product);
+    return order ? buildSellerOwnedProductTradeResumePrimaryActionLabel(order) : '\u81ea\u5df1\u7684\u5546\u54c1';
+  }
+
+  private isTradeResumeBottomActionEnabled(product: Product): boolean {
+    return this.shouldUseTradeResumeBottomBar(product) || this.canCurrentUserTrade(product);
+  }
+
+  private isSellerOwnedTradeBottomActionEnabled(product: Product): boolean {
+    return this.shouldUseSellerOwnedTradeBottomBar(product);
+  }
+
+  private handleTradeResumeSecondaryAction(product: Product): void {
+    if (this.getExistingTradeThread(product)) {
+      this.openExistingTradeThread(product);
+      return;
+    }
+    this.openExistingTradeOrder(product);
+  }
+
+  private handleSellerOwnedTradeSecondaryAction(product: Product): void {
+    if (this.getSellerOwnedTradeThread(product)) {
+      this.openSellerOwnedTradeThread(product);
+      return;
+    }
+    this.openSellerOwnedTradeOrder(product);
+  }
+
+  private getTradeResumeChatActionLabel(product: Product): string {
+    const linkedOrder = this.getExistingTradeOrder(product);
+    return linkedOrder ? buildOrderConversationActionLabel(linkedOrder) : '继续沟通';
+  }
+
+  private getTradeResumeOrderActionLabel(product: Product): string {
+    const linkedOrder = this.getExistingTradeOrder(product);
+    const currentUserId = this.getCurrentUserId();
+    if (!linkedOrder || currentUserId.length === 0) {
+      return '查看订单详情';
+    }
+    return buildTradeProgressActionLabel(linkedOrder, currentUserId);
+  }
+
+  private openExistingTradeThread(product: Product): void {
+    const thread = this.getExistingTradeThread(product);
+    if (!thread) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Chat/ChatDetailPage',
+      params: { threadId: thread.id }
+    });
+  }
+
+  private openExistingTradeOrder(product: Product): void {
+    const linkedOrder = this.getExistingTradeOrder(product);
+    if (!linkedOrder) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Order/OrderDetailPage',
+      params: {
+        orderId: linkedOrder.id,
+        source: 'product'
+      }
+    });
+  }
+
+  private openSellerOwnedTradeThread(product: Product): void {
+    const thread = this.getSellerOwnedTradeThread(product);
+    if (!thread) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Chat/ChatDetailPage',
+      params: { threadId: thread.id }
+    });
+  }
+
+  private openSellerOwnedTradeOrder(product: Product): void {
+    const linkedOrder = this.getSellerOwnedTradeOrder(product);
+    if (!linkedOrder) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Order/OrderDetailPage',
+      params: {
+        orderId: linkedOrder.id,
+        source: 'product'
+      }
+    });
+  }
+
+  private getTradeSafetyPrompts(product: Product): string[] {
+    return buildCampusTradeSafetyPrompts(product.category, 'product_detail');
+  }
+
   private async contactSeller(): Promise<void> {
     const currentUser: User | null = appContext.getCurrentUser();
     if (!currentUser) {
@@ -387,7 +625,7 @@ struct ProductDetailPage {
     if (!this.product || !this.canCurrentUserSubmitModeration(this.product)) {
       return;
     }
-    const sellerNickname = userRepository.getById(this.product.sellerId)?.nickname ?? '当前卖家';
+    const sellerNickname = userRepository.getById(this.product.sellerId)?.nickname ?? buildModerationTargetFallbackTitle('user_report', '??');
     pushUrlByContext(this, {
       url: 'pages/Moderation/SubmitModerationPage',
       params: {
@@ -421,6 +659,34 @@ struct ProductDetailPage {
 
   private getSellerTrustTagBackground(): string {
     return buildCampusTrustTonePalette(this.getSellerTrustPresentation().tone).tagBackgroundColor;
+  }
+
+  @Builder
+  private buildModerationActionRow(): void {
+    Row({ space: 10 }) {
+      Button(buildModerationEntryActionLabel('product_report'))
+        .layoutWeight(1)
+        .height(40)
+        .type(ButtonType.Normal)
+        .fontSize(13)
+        .fontColor('#A86B00')
+        .backgroundColor('#FFF6E6')
+        .border({ width: 1, color: '#E8D8B6' })
+        .borderRadius(14)
+        .onClick(() => this.openProductReportPage())
+
+      Button(buildModerationEntryActionLabel('user_report', '卖家'))
+        .layoutWeight(1)
+        .height(40)
+        .type(ButtonType.Normal)
+        .fontSize(13)
+        .fontColor('#A86B00')
+        .backgroundColor('#FFF6E6')
+        .border({ width: 1, color: '#E8D8B6' })
+        .borderRadius(14)
+        .onClick(() => this.openSellerReportPage())
+    }
+    .width('100%')
   }
 
   @Builder
@@ -521,30 +787,7 @@ struct ProductDetailPage {
         .fontColor('#8C867F')
 
       if (this.product && this.canCurrentUserSubmitModeration(this.product)) {
-        Row({ space: 10 }) {
-          Button('举报商品')
-            .layoutWeight(1)
-            .height(40)
-            .type(ButtonType.Normal)
-            .fontSize(13)
-            .fontColor('#A86B00')
-            .backgroundColor('#FFF6E6')
-            .border({ width: 1, color: '#E8D8B6' })
-            .borderRadius(14)
-            .onClick(() => this.openProductReportPage())
-
-          Button('举报卖家')
-            .layoutWeight(1)
-            .height(40)
-            .type(ButtonType.Normal)
-            .fontSize(13)
-            .fontColor('#A86B00')
-            .backgroundColor('#FFF6E6')
-            .border({ width: 1, color: '#E8D8B6' })
-            .borderRadius(14)
-            .onClick(() => this.openSellerReportPage())
-        }
-        .width('100%')
+        this.buildModerationActionRow()
       }
     }
     .width('100%')
@@ -706,9 +949,7 @@ struct ProductDetailPage {
           }
           .width('100%')
 
-          Text(isProductOwnedByUser(product, appContext.getCurrentUser()?.id ?? '')
-            ? getSelfOwnedHintText()
-            : getProductDetailTradeHint(product, appContext.getCurrentUser()))
+          Text(this.getDetailHint(product))
             .width('100%')
             .fontSize(14)
             .fontColor(SUB_TEXT_COLOR)
@@ -762,6 +1003,59 @@ struct ProductDetailPage {
           .padding(18)
           .backgroundColor(CARD_BACKGROUND)
           .borderRadius(22)
+
+          if (this.shouldShowSellerOwnedTradeResumeCard(product)) {
+            Column({ space: 12 }) {
+              Text(buildSellerPublishedTradeSectionTitle(this.getSellerOwnedTradeOrder(product) as Order))
+                .width('100%')
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(TITLE_COLOR)
+
+              Text(this.getSellerOwnedTradeResumeTitle(product))
+                .width('100%')
+                .fontSize(16)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(TITLE_COLOR)
+
+              Text(this.getSellerOwnedTradeResumeDescription(product))
+                .width('100%')
+                .fontSize(14)
+                .lineHeight(22)
+                .fontColor(SUB_TEXT_COLOR)
+
+              Text(buildSellerTradeCounterpartyText(this.getSellerOwnedTradeBuyerName(product)))
+                .width('100%')
+                .fontSize(12)
+                .fontColor('#6B655E')
+
+              Row({ space: 10 }) {
+                if (this.getSellerOwnedTradeThread(product)) {
+                  Button(this.getSellerOwnedTradeBottomSecondaryLabel(product))
+                    .layoutWeight(1)
+                    .height(44)
+                    .type(ButtonType.Normal)
+                    .backgroundColor('#E8F0FF')
+                    .fontColor('#2F6BFF')
+                    .onClick(() => this.openSellerOwnedTradeThread(product))
+                }
+
+                if (this.getSellerOwnedTradeOrder(product)) {
+                  Button(this.getSellerOwnedTradeBottomPrimaryLabel(product))
+                    .layoutWeight(1)
+                    .height(44)
+                    .backgroundColor('#2F6BFF')
+                    .fontColor('#FFFFFF')
+                    .onClick(() => this.openSellerOwnedTradeOrder(product))
+                }
+              }
+              .width('100%')
+            }
+            .width('100%')
+            .padding(18)
+            .backgroundColor('#F5F8FF')
+            .borderRadius(22)
+          }
         }
 
         Column({ space: 14 }) {
@@ -792,6 +1086,82 @@ struct ProductDetailPage {
         .backgroundColor(CARD_BACKGROUND)
         .borderRadius(22)
 
+        if (this.shouldShowTradeResumeCard(product)) {
+          Column({ space: 12 }) {
+            Text(buildProductTradeResumeSectionTitle(this.getExistingTradeOrder(product)))
+              .width('100%')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(TITLE_COLOR)
+
+            Text(this.getTradeResumeTitle(product))
+              .width('100%')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(TITLE_COLOR)
+
+            Text(this.getTradeResumeDescription(product))
+              .width('100%')
+              .fontSize(14)
+              .lineHeight(22)
+              .fontColor(SUB_TEXT_COLOR)
+
+            Row({ space: 10 }) {
+              if (this.getExistingTradeThread(product)) {
+                Button(this.getTradeResumeChatActionLabel(product))
+                  .layoutWeight(1)
+                  .height(44)
+                  .type(ButtonType.Normal)
+                  .backgroundColor('#E8F0FF')
+                  .fontColor('#2F6BFF')
+                  .onClick(() => this.openExistingTradeThread(product))
+              }
+
+              if (this.getExistingTradeOrder(product)) {
+                Button(this.getTradeResumeOrderActionLabel(product))
+                  .layoutWeight(1)
+                  .height(44)
+                  .backgroundColor('#2F6BFF')
+                  .fontColor('#FFFFFF')
+                  .onClick(() => this.openExistingTradeOrder(product))
+              }
+            }
+            .width('100%')
+          }
+          .width('100%')
+          .padding(18)
+          .backgroundColor('#F5F8FF')
+          .borderRadius(22)
+        }
+
+        Column({ space: 10 }) {
+          Text(buildCampusTradeSafetyHeadline('product_detail'))
+            .width('100%')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(TITLE_COLOR)
+
+          ForEach(this.getTradeSafetyPrompts(product), (tip: string) => {
+            Row({ space: 8 }) {
+              Text('·')
+                .fontSize(13)
+                .fontColor(SUB_TEXT_COLOR)
+
+              Text(tip)
+                .layoutWeight(1)
+                .fontSize(13)
+                .lineHeight(20)
+                .fontColor('#5E5851')
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Top)
+          }, (tip: string) => tip)
+        }
+        .width('100%')
+        .padding(18)
+        .backgroundColor(CARD_BACKGROUND)
+        .borderRadius(22)
+
         this.buildSellerTrustCard()
       }
       .width('100%')
@@ -804,21 +1174,69 @@ struct ProductDetailPage {
   @Builder
   private buildBottomBar(product: Product): void {
     Row({ space: 10 }) {
-      Button(this.currentUserOwnsProduct(product) ? '\u81ea\u5df1\u7684\u5546\u54c1' : getSecondaryButtonText(product.status))
+      Button(this.currentUserOwnsProduct(product)
+        ? (this.shouldUseSellerOwnedTradeBottomBar(product)
+          ? this.getSellerOwnedTradeBottomSecondaryLabel(product)
+          : '\u81ea\u5df1\u7684\u5546\u54c1')
+        : (this.shouldUseTradeResumeBottomBar(product)
+          ? this.getTradeResumeBottomSecondaryLabel(product)
+          : getSecondaryButtonText(product.status)))
         .layoutWeight(1)
         .height(48)
-        .enabled(this.canCurrentUserTrade(product))
-        .backgroundColor(this.canCurrentUserTrade(product) ? '#E8F0FF' : DISABLED_BUTTON_COLOR)
-        .fontColor(this.canCurrentUserTrade(product) ? '#2F6BFF' : DISABLED_BUTTON_TEXT_COLOR)
-        .onClick(() => this.addToCart())
+        .enabled(this.currentUserOwnsProduct(product)
+          ? this.isSellerOwnedTradeBottomActionEnabled(product)
+          : this.isTradeResumeBottomActionEnabled(product))
+        .backgroundColor((this.currentUserOwnsProduct(product)
+          ? this.isSellerOwnedTradeBottomActionEnabled(product)
+          : this.isTradeResumeBottomActionEnabled(product)) ? '#E8F0FF' : DISABLED_BUTTON_COLOR)
+        .fontColor((this.currentUserOwnsProduct(product)
+          ? this.isSellerOwnedTradeBottomActionEnabled(product)
+          : this.isTradeResumeBottomActionEnabled(product)) ? '#2F6BFF' : DISABLED_BUTTON_TEXT_COLOR)
+        .onClick(() => {
+          if (this.currentUserOwnsProduct(product)) {
+            if (this.shouldUseSellerOwnedTradeBottomBar(product)) {
+              this.handleSellerOwnedTradeSecondaryAction(product);
+            }
+            return;
+          }
+          if (this.shouldUseTradeResumeBottomBar(product)) {
+            this.handleTradeResumeSecondaryAction(product);
+            return;
+          }
+          this.addToCart();
+        })
 
-      Button(this.currentUserOwnsProduct(product) ? '\u4e0d\u80fd\u81ea\u5df1\u4e0b\u5355' : getPrimaryButtonText(product.status))
+      Button(this.currentUserOwnsProduct(product)
+        ? (this.shouldUseSellerOwnedTradeBottomBar(product)
+          ? this.getSellerOwnedTradeBottomPrimaryLabel(product)
+          : '\u4e0d\u80fd\u81ea\u5df1\u4e0b\u5355')
+        : (this.shouldUseTradeResumeBottomBar(product)
+          ? this.getTradeResumeBottomPrimaryLabel(product)
+          : getPrimaryButtonText(product.status)))
         .layoutWeight(1)
         .height(48)
-        .enabled(this.canCurrentUserTrade(product))
-        .backgroundColor(this.canCurrentUserTrade(product) ? '#2F6BFF' : DISABLED_BUTTON_COLOR)
-        .fontColor(this.canCurrentUserTrade(product) ? '#FFFFFF' : DISABLED_BUTTON_TEXT_COLOR)
-        .onClick(() => this.orderNow())
+        .enabled(this.currentUserOwnsProduct(product)
+          ? this.isSellerOwnedTradeBottomActionEnabled(product)
+          : this.isTradeResumeBottomActionEnabled(product))
+        .backgroundColor((this.currentUserOwnsProduct(product)
+          ? this.isSellerOwnedTradeBottomActionEnabled(product)
+          : this.isTradeResumeBottomActionEnabled(product)) ? '#2F6BFF' : DISABLED_BUTTON_COLOR)
+        .fontColor((this.currentUserOwnsProduct(product)
+          ? this.isSellerOwnedTradeBottomActionEnabled(product)
+          : this.isTradeResumeBottomActionEnabled(product)) ? '#FFFFFF' : DISABLED_BUTTON_TEXT_COLOR)
+        .onClick(() => {
+          if (this.currentUserOwnsProduct(product)) {
+            if (this.shouldUseSellerOwnedTradeBottomBar(product)) {
+              this.openSellerOwnedTradeOrder(product);
+            }
+            return;
+          }
+          if (this.shouldUseTradeResumeBottomBar(product)) {
+            this.openExistingTradeOrder(product);
+            return;
+          }
+          this.orderNow();
+        })
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 18 })

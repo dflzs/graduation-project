@@ -1,7 +1,9 @@
 ﻿import { pushUrlByContext, showToastByContext } from '../../utils/ui-context-actions';
 import { appContext } from '../../app/app-context';
 import { ChatThread, MessageNotification, NotificationType, User } from '../../types/domain';
+import { orderRepository } from '../../repositories/order.repo';
 import { formatTime } from '../../utils/time';
+import { buildCompactHandoverSummary } from '../../utils/handover-scheduling';
 import { buildReminderRenderKey, buildThreadRenderKey } from '../../utils/render-keys';
 import {
   buildMarketplaceUserSyncKeys,
@@ -15,6 +17,11 @@ import {
   MessageReminderTarget
 } from '../../utils/message-reminder-route';
 import { getMarketplaceAudienceMode, MarketplaceAudienceMode } from '../../utils/trade-guard';
+import {
+  buildMessageThreadOrderActionLabel,
+  buildMessageThreadTradeSnapshot
+} from '../../utils/trade-progress-guidance';
+import { buildTradeLinkedProductCompactActionLabel } from '../../utils/trade-cross-navigation';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFDFC';
@@ -210,6 +217,44 @@ export struct MessageHubPage {
     });
   }
 
+  private getThreadTradeSnapshot(thread: ChatThread): string {
+    const linkedOrder = orderRepository.findLatestByTradeContext(thread.productId, thread.buyerId, thread.sellerId);
+    return linkedOrder ? buildMessageThreadTradeSnapshot(linkedOrder) : '';
+  }
+
+  private getThreadHandoverSummary(thread: ChatThread): string {
+    const linkedOrder = orderRepository.findLatestByTradeContext(thread.productId, thread.buyerId, thread.sellerId);
+    return linkedOrder ? buildCompactHandoverSummary(linkedOrder.locationTag, linkedOrder.address) : '';
+  }
+
+  private getThreadOrderActionLabel(thread: ChatThread): string {
+    const linkedOrder = orderRepository.findLatestByTradeContext(thread.productId, thread.buyerId, thread.sellerId);
+    return linkedOrder && this.currentUser
+      ? buildMessageThreadOrderActionLabel(linkedOrder, this.currentUser.id)
+      : '看订单';
+  }
+
+  private openThreadOrder(thread: ChatThread): void {
+    const linkedOrder = orderRepository.findLatestByTradeContext(thread.productId, thread.buyerId, thread.sellerId);
+    if (!linkedOrder) {
+      return;
+    }
+    pushUrlByContext(this, {
+      url: 'pages/Order/OrderDetailPage',
+      params: {
+        orderId: linkedOrder.id,
+        source: 'message'
+      }
+    });
+  }
+
+  private openThreadProduct(thread: ChatThread): void {
+    pushUrlByContext(this, {
+      url: 'pages/Product/ProductDetailPage',
+      params: { productId: thread.productId }
+    });
+  }
+
   @Builder
   private buildTopHeader(): void {
     Row() {
@@ -393,6 +438,22 @@ export struct MessageHubPage {
           .lineHeight(21)
           .fontColor('#5E5851')
 
+        if (this.getThreadTradeSnapshot(thread).length > 0) {
+          Text(this.getThreadTradeSnapshot(thread))
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(19)
+            .fontColor('#6B655E')
+        }
+
+        if (this.getThreadHandoverSummary(thread).length > 0) {
+          Text(this.getThreadHandoverSummary(thread))
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(19)
+            .fontColor('#7B756E')
+        }
+
         Text(thread.lastMessage)
           .width('100%')
           .fontSize(14)
@@ -408,10 +469,37 @@ export struct MessageHubPage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
 
-      Text('进入')
-        .fontSize(15)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(PRIMARY_COLOR)
+      Column({ space: 8 }) {
+        if (this.getThreadTradeSnapshot(thread).length > 0) {
+          Button(this.getThreadOrderActionLabel(thread))
+            .height(34)
+            .type(ButtonType.Normal)
+            .fontSize(12)
+            .fontColor(PRIMARY_COLOR)
+            .backgroundColor('#E8F0FF')
+            .border({ width: 1, color: '#D6E3FF' })
+            .borderRadius(14)
+            .padding({ left: 12, right: 12 })
+            .onClick(() => this.openThreadOrder(thread))
+        }
+
+        Button(buildTradeLinkedProductCompactActionLabel())
+          .height(34)
+          .type(ButtonType.Normal)
+          .fontSize(12)
+          .fontColor('#6B655E')
+          .backgroundColor('#F5F1EB')
+          .border({ width: 1, color: '#E3D9CC' })
+          .borderRadius(14)
+          .padding({ left: 12, right: 12 })
+          .onClick(() => this.openThreadProduct(thread))
+
+        Text('进入')
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(PRIMARY_COLOR)
+      }
+      .alignItems(HorizontalAlign.End)
     }
     .width('100%')
     .padding(18)

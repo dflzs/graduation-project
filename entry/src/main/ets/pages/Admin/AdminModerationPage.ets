@@ -1,7 +1,11 @@
-﻿import { appContext } from '../../app/app-context';
+import { appContext } from '../../app/app-context';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { LoadingState } from '../../components/LoadingState';
+import { chatRepository } from '../../repositories/chat.repo';
+import { orderRepository } from '../../repositories/order.repo';
+import { productRepository } from '../../repositories/product.repo';
+import { userRepository } from '../../repositories/user.repo';
 import { getAdminAccessDeniedMessage, getAdminActionDeniedMessage } from '../../services/guard.service';
 import { AppealRecord, ModerationRecord, OperationResult } from '../../types/domain';
 import { buildAdminGuardSyncKeys } from '../../utils/admin-dashboard-sync';
@@ -40,11 +44,18 @@ import {
   buildAdminModerationEmptyState,
   buildAdminModerationErrorTitle,
   buildAdminModerationFactLabel,
+  buildAdminModerationFactValue,
   buildAdminModerationGuidanceTitle,
   buildAdminModerationHeaderDescription,
+  buildAdminModerationLinkedRecordReferenceValue,
   buildAdminModerationLinkedRecordMeta,
+  buildAdminModerationListMetaSummary,
   buildAdminModerationLoadingCopy,
   buildAdminModerationPageTitle,
+  buildAdminModerationReferenceValue,
+  buildAdminModerationRecordDescription,
+  buildAdminModerationRecordTitle,
+  buildAdminModerationTargetReferenceValue,
   buildAdminModerationReviewCommentText,
   buildAdminModerationSelectionToast,
   buildAdminModerationSummaryCardCopy,
@@ -415,6 +426,46 @@ struct AdminModerationPage {
     .width('100%')
   }
 
+  private resolveUserReference(userId: string): string {
+    const nickname = userRepository.getById(userId)?.nickname ?? '';
+    return buildAdminModerationReferenceValue(nickname, userId);
+  }
+
+  private resolveTargetReference(record: ModerationRecord): string {
+    if (record.targetType === 'product_report') {
+      const productId = record.relatedProductId ?? record.targetId;
+      const productTitle = productRepository.getById(productId)?.title ?? '';
+      return buildAdminModerationTargetReferenceValue(productTitle, record.targetId);
+    }
+
+    if (record.targetType === 'user_report') {
+      const reportedUserId = record.reportedUserId ?? record.targetId;
+      const nickname = userRepository.getById(reportedUserId)?.nickname ?? '';
+      return buildAdminModerationTargetReferenceValue(nickname, record.targetId);
+    }
+
+    if (record.targetType === 'order_complaint') {
+      const orderId = record.relatedOrderId ?? record.targetId;
+      const order = orderRepository.getById(orderId);
+      const productTitle = order ? (productRepository.getById(order.productId)?.title ?? '') : '';
+      return buildAdminModerationTargetReferenceValue(productTitle, record.targetId);
+    }
+
+    const threadId = record.relatedThreadId ?? record.targetId;
+    const thread = chatRepository.getThreadById(threadId);
+    const productTitle = thread ? (productRepository.getById(thread.productId)?.title ?? '') : '';
+    return buildAdminModerationTargetReferenceValue(productTitle, record.targetId);
+  }
+
+  private resolveLinkedModerationRecordReference(recordId: string): string {
+    const linkedRecord = this.moderationRecords.find((item: ModerationRecord) => item.id === recordId) ?? null;
+    if (linkedRecord === null) {
+      return buildAdminModerationLinkedRecordReferenceValue('', recordId);
+    }
+    const title = buildAdminModerationRecordTitle(getAdminModerationTargetLabel(linkedRecord.targetType), linkedRecord.reason);
+    return buildAdminModerationLinkedRecordReferenceValue(title, recordId);
+  }
+
   @Builder
   private buildGuidancePanel(title: string, summary: string, guidance: string, background: string, border: string, accent: string): void {
     Column({ space: 8 }) {
@@ -470,7 +521,7 @@ struct AdminModerationPage {
       }
       .width('100%')
 
-      Text(record.reason)
+      Text(buildAdminModerationRecordTitle(getAdminModerationTargetLabel(record.targetType), record.reason))
         .width('100%')
         .fontSize(17)
         .fontWeight(FontWeight.Bold)
@@ -483,14 +534,14 @@ struct AdminModerationPage {
         .lineHeight(18)
         .fontColor('#8A837B')
 
-      Text(record.description)
+      Text(buildAdminModerationRecordDescription(record.description))
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
         .fontColor(SUB_TEXT_COLOR)
         .maxLines(3)
 
-      Text(buildAdminModerationUpdatedMeta(formatTime(record.updatedAt)))
+      Text(buildAdminModerationListMetaSummary('moderation', formatTime(record.updatedAt)))
         .width('100%')
         .fontSize(12)
         .fontColor('#9A9185')
@@ -523,29 +574,24 @@ struct AdminModerationPage {
       }
       .width('100%')
 
-      Text(record.reason)
+      Text(buildAdminModerationRecordTitle(buildAdminModerationBadgeLabel('appeal'), record.reason))
         .width('100%')
         .fontSize(17)
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text(buildAdminModerationLinkedRecordMeta(record.moderationRecordId))
-        .width('100%')
-        .fontSize(12)
-        .lineHeight(18)
-        .fontColor('#8A837B')
-
-      Text(record.description)
+      Text(buildAdminModerationRecordDescription(record.description))
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
         .fontColor(SUB_TEXT_COLOR)
         .maxLines(3)
 
-      Text(buildAdminModerationUpdatedMeta(formatTime(record.updatedAt)))
+      Text(buildAdminModerationListMetaSummary('appeal', formatTime(record.updatedAt), record.moderationRecordId))
         .width('100%')
         .fontSize(12)
-        .fontColor('#9A9185')
+        .lineHeight(18)
+        .fontColor('#8A837B')
     }
     .width('100%')
     .padding(16)
@@ -605,13 +651,13 @@ struct AdminModerationPage {
         this.buildFactRow(buildAdminModerationFactLabel('target_type'), getAdminModerationTargetLabel(record.targetType))
         this.buildFactRow(buildAdminModerationFactLabel('status'), getAdminModerationStatusLabel(record.status))
         this.buildFactRow(buildAdminModerationFactLabel('priority'), getAdminModerationPriorityLabel(record.priority))
-        this.buildFactRow(buildAdminModerationFactLabel('target_id'), record.targetId)
-        this.buildFactRow(buildAdminModerationFactLabel('reporter'), record.reporterId)
+        this.buildFactRow(buildAdminModerationFactLabel('target_id'), this.resolveTargetReference(record))
+        this.buildFactRow(buildAdminModerationFactLabel('reporter'), this.resolveUserReference(record.reporterId))
         if (record.reportedUserId !== undefined && record.reportedUserId.length > 0) {
-          this.buildFactRow(buildAdminModerationFactLabel('reported_user'), record.reportedUserId)
+          this.buildFactRow(buildAdminModerationFactLabel('reported_user'), this.resolveUserReference(record.reportedUserId))
         }
-        this.buildFactRow(buildAdminModerationFactLabel('evidence_count'), `${record.evidenceItems?.length ?? 0} 浠絗)
-        this.buildFactRow(buildAdminModerationFactLabel('submitted_at'), formatTime(record.createdAt))
+        this.buildFactRow(buildAdminModerationFactLabel('evidence_count'), buildAdminModerationFactValue('evidence_count', record.evidenceItems?.length ?? 0))
+        this.buildFactRow(buildAdminModerationFactLabel('submitted_at'), buildAdminModerationFactValue('submitted_at', formatTime(record.createdAt)))
       }
       .width('100%')
       .padding(14)
@@ -619,13 +665,13 @@ struct AdminModerationPage {
       .borderRadius(18)
       .border({ width: 1, color: '#E9DAC9' })
 
-      Text(record.reason)
+      Text(buildAdminModerationRecordTitle(getAdminModerationTargetLabel(record.targetType), record.reason))
         .width('100%')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text(record.description)
+      Text(buildAdminModerationRecordDescription(record.description))
         .width('100%')
         .fontSize(13)
         .lineHeight(20)
@@ -700,11 +746,11 @@ struct AdminModerationPage {
 
       Column({ space: 8 }) {
         this.buildFactRow(buildAdminModerationFactLabel('appeal_status'), getAdminModerationAppealStatusLabel(record.status))
-        this.buildFactRow(buildAdminModerationFactLabel('linked_record'), record.moderationRecordId)
-        this.buildFactRow(buildAdminModerationFactLabel('appellant'), record.appellantId)
-        this.buildFactRow(buildAdminModerationFactLabel('evidence_count'), `${record.evidenceItems.length} 浠絗)
-        this.buildFactRow(buildAdminModerationFactLabel('submitted_at'), formatTime(record.createdAt))
-        this.buildFactRow(buildAdminModerationFactLabel('updated_at'), formatTime(record.updatedAt))
+        this.buildFactRow(buildAdminModerationFactLabel('linked_record'), this.resolveLinkedModerationRecordReference(record.moderationRecordId))
+        this.buildFactRow(buildAdminModerationFactLabel('appellant'), this.resolveUserReference(record.appellantId))
+        this.buildFactRow(buildAdminModerationFactLabel('evidence_count'), buildAdminModerationFactValue('evidence_count', record.evidenceItems.length))
+        this.buildFactRow(buildAdminModerationFactLabel('submitted_at'), buildAdminModerationFactValue('submitted_at', formatTime(record.createdAt)))
+        this.buildFactRow(buildAdminModerationFactLabel('updated_at'), buildAdminModerationFactValue('updated_at', formatTime(record.updatedAt)))
       }
       .width('100%')
       .padding(14)
@@ -712,13 +758,13 @@ struct AdminModerationPage {
       .borderRadius(18)
       .border({ width: 1, color: '#D8EAD9' })
 
-      Text(record.reason)
+      Text(buildAdminModerationRecordTitle(buildAdminModerationBadgeLabel('appeal'), record.reason))
         .width('100%')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(TITLE_COLOR)
 
-      Text(record.description)
+      Text(buildAdminModerationRecordDescription(record.description))
         .width('100%')
         .fontSize(13)
         .lineHeight(20)

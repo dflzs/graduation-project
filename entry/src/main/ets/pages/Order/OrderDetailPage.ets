@@ -1,5 +1,6 @@
 import { appContext } from '../../app/app-context';
 import { ORDER_STATUS_TEXT } from '../../constants/config';
+import { chatRepository } from '../../repositories/chat.repo';
 import { orderRepository } from '../../repositories/order.repo';
 import { productRepository } from '../../repositories/product.repo';
 import { reviewRepository } from '../../repositories/review.repo';
@@ -22,6 +23,27 @@ import {
   CampusTrustPresentation
 } from '../../utils/campus-trust-ui';
 import { buildMarketplaceUserSyncKeys } from '../../utils/marketplace-audience-ui';
+import {
+  buildModerationEntryActionLabel,
+  buildModerationEntryDescription,
+  buildModerationEntryTitle,
+  buildModerationTargetFallbackTitle
+} from '../../utils/moderation-submit-copy';
+import { buildHandoverStatusSummary } from '../../utils/handover-scheduling';
+import {
+  buildOrderConversationActionLabel,
+  buildOrderConversationPrompt,
+  buildTradeProgressNextStep,
+  buildTradeProgressStatusDescription
+} from '../../utils/trade-progress-guidance';
+import {
+  buildCampusTradeSafetyHeadline,
+  buildCampusTradeSafetyPrompts
+} from '../../utils/trade-safety-prompts';
+import {
+  buildTradeLinkedProductActionLabel,
+  buildTradeLinkedProductPrompt
+} from '../../utils/trade-cross-navigation';
 
 const PAGE_BACKGROUND: string = '#F7F3EE';
 const CARD_BACKGROUND: string = '#FFFCF8';
@@ -181,24 +203,26 @@ struct OrderDetailPage {
   }
 
   private getStatusDescription(): string {
-    if (!this.order) {
-      return '';
+    return this.order ? buildTradeProgressStatusDescription(this.order, this.currentUser()?.id ?? '') : '';
+  }
+
+  private getConversationThreadId(): string {
+    return this.order ? chatRepository.findThreadByOrder(this.order)?.id ?? '' : '';
+  }
+
+  private canOpenConversation(): boolean {
+    return this.getConversationThreadId().length > 0;
+  }
+
+  private openConversation(): void {
+    const threadId = this.getConversationThreadId();
+    if (threadId.length === 0) {
+      return;
     }
-    if (this.order.status === OrderStatus.PENDING_PAYMENT) {
-      return this.isBuyer()
-        ? '商品已为本次订单锁定，请先完成模拟支付，再继续安排线下面交。'
-        : '订单已创建，商品已进入交易中，等待买家完成模拟支付。';
-    }
-    if (this.order.status === OrderStatus.PAID_SIMULATED) {
-      return '双方到达约定地点后，订单会自动进入待交接状态。';
-    }
-    if (this.order.status === OrderStatus.READY_HANDOVER) {
-      return '双方均已到场，可以现场完成商品验收与交接。';
-    }
-    if (this.order.status === OrderStatus.COMPLETED) {
-      return this.order.reviewed ? '本次交易已完成，评价也已经提交。' : '交易已完成，可以补充本次交易评价。';
-    }
-    return '订单已经取消，本次交易流程结束。';
+    pushUrlByContext(this, {
+      url: 'pages/Chat/ChatDetailPage',
+      params: { threadId }
+    });
   }
 
   private getCounterpartyName(): string {
@@ -257,26 +281,21 @@ struct OrderDetailPage {
   }
 
   private getNextStepText(): string {
-    if (!this.order) {
-      return '';
+    return this.order ? buildTradeProgressNextStep(this.order, this.currentUser()?.id ?? '') : '';
+  }
+
+  private getTradeSafetyPrompts(): string[] {
+    return buildCampusTradeSafetyPrompts(this.product?.category ?? '其他', 'order_detail');
+  }
+
+  private openLinkedProductDetail(): void {
+    if (!this.product) {
+      return;
     }
-    if (this.order.status === OrderStatus.PENDING_PAYMENT) {
-      return this.isBuyer()
-        ? '下一步建议：完成模拟支付后，和卖家确认面交时间。'
-        : '下一步建议：等待买家支付后，再确认面交安排。';
-    }
-    if (this.order.status === OrderStatus.PAID_SIMULATED) {
-      return '下一步建议：双方按约定到达面交地点，系统会记录到场状态。';
-    }
-    if (this.order.status === OrderStatus.READY_HANDOVER) {
-      return '下一步建议：现场确认商品无误后，完成本次交易。';
-    }
-    if (this.order.status === OrderStatus.COMPLETED) {
-      return this.order.reviewed
-        ? '本次订单已全部处理完毕。'
-        : '下一步建议：补充评价，完善这次交易记录。';
-    }
-    return '本次订单已结束，无需继续处理。';
+    pushUrlByContext(this, {
+      url: 'pages/Product/ProductDetailPage',
+      params: { productId: this.product.id }
+    });
   }
 
   @Builder
@@ -393,7 +412,7 @@ struct OrderDetailPage {
       params: {
         targetType: 'order_complaint',
         targetId: this.order.id,
-        title: this.product?.title ?? '当前订单'
+        title: this.product?.title ?? buildModerationTargetFallbackTitle('order_complaint')
       }
     });
   }
@@ -507,6 +526,50 @@ struct OrderDetailPage {
       .padding(14)
       .backgroundColor(CARD_SOFT_BACKGROUND)
       .borderRadius(16)
+
+      Column({ space: 8 }) {
+        Text('面交安排')
+          .width('100%')
+          .fontSize(12)
+          .fontColor(FIELD_LABEL_COLOR)
+
+        Text(buildHandoverStatusSummary(order.locationTag, order.address))
+          .width('100%')
+          .fontSize(13)
+          .lineHeight(20)
+          .fontColor('#5B554F')
+      }
+      .width('100%')
+      .padding(14)
+      .backgroundColor(CARD_SOFT_BACKGROUND)
+      .borderRadius(16)
+
+      Column({ space: 8 }) {
+        Text(buildCampusTradeSafetyHeadline('order_detail'))
+          .width('100%')
+          .fontSize(12)
+          .fontColor(FIELD_LABEL_COLOR)
+
+        ForEach(this.getTradeSafetyPrompts(), (tip: string) => {
+          Row({ space: 8 }) {
+            Text('·')
+              .fontSize(12)
+              .fontColor(FIELD_LABEL_COLOR)
+
+            Text(tip)
+              .layoutWeight(1)
+              .fontSize(13)
+              .lineHeight(20)
+              .fontColor('#5B554F')
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+        }, (tip: string) => tip)
+      }
+      .width('100%')
+      .padding(14)
+      .backgroundColor(CARD_SOFT_BACKGROUND)
+      .borderRadius(16)
     }
     .width('100%')
     .padding(18)
@@ -568,6 +631,20 @@ struct OrderDetailPage {
         .padding(14)
         .backgroundColor(CARD_SOFT_BACKGROUND)
         .borderRadius(16)
+
+        Text(buildTradeLinkedProductPrompt('order'))
+          .width('100%')
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor(MUTED_COLOR)
+
+        this.buildActionButton(
+          buildTradeLinkedProductActionLabel(),
+          '#FFFFFF',
+          PRIMARY_COLOR,
+          SECONDARY_BORDER,
+          () => this.openLinkedProductDetail()
+        )
       }
     }
     .width('100%')
@@ -801,7 +878,17 @@ struct OrderDetailPage {
         .backgroundColor('#F8ECE4')
         .borderRadius(16)
 
-        this.buildActionButton('杩斿洖璁㈠崟鍒楄〃', '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.goBack())
+        if (this.canOpenConversation()) {
+          Text(buildOrderConversationPrompt(order))
+            .width('100%')
+            .fontSize(13)
+            .lineHeight(20)
+            .fontColor(MUTED_COLOR)
+
+          this.buildActionButton(buildOrderConversationActionLabel(order), '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.openConversation())
+        }
+
+        this.buildActionButton('返回订单列表', '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.goBack())
       } else if (order.status === OrderStatus.PENDING_PAYMENT && this.isBuyer()) {
         this.buildActionButton('完成模拟支付', PRIMARY_COLOR, '#FFFFFF', PRIMARY_COLOR, () => this.runAction('pay'))
         this.buildActionButton('取消订单', DANGER_BACKGROUND, DANGER_TEXT_COLOR, DANGER_BORDER, () => this.runAction('cancel'))
@@ -824,7 +911,27 @@ struct OrderDetailPage {
         .backgroundColor(CARD_SOFT_BACKGROUND)
         .borderRadius(16)
 
+        if (this.canOpenConversation()) {
+          Text(buildOrderConversationPrompt(order))
+            .width('100%')
+            .fontSize(13)
+            .lineHeight(20)
+            .fontColor(MUTED_COLOR)
+
+          this.buildActionButton(buildOrderConversationActionLabel(order), '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.openConversation())
+        }
+
         this.buildActionButton('返回订单列表', '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.goBack())
+      }
+
+      if (!this.isReadOnlyTradeView() && order.status !== OrderStatus.CANCELED && this.canOpenConversation()) {
+        Text(buildOrderConversationPrompt(order))
+          .width('100%')
+          .fontSize(13)
+          .lineHeight(20)
+          .fontColor(MUTED_COLOR)
+
+        this.buildActionButton(buildOrderConversationActionLabel(order), '#FFFFFF', PRIMARY_COLOR, SECONDARY_BORDER, () => this.openConversation())
       }
     }
     .width('100%')
@@ -858,6 +965,27 @@ struct OrderDetailPage {
     .border({ width: 1, color: CARD_BORDER })
   }
 
+  @Builder
+  private buildGovernanceEntryCard(): void {
+    Column({ space: 10 }) {
+      Text(buildModerationEntryTitle('order_complaint'))
+        .width('100%')
+        .fontSize(15)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(FIELD_LABEL_COLOR)
+      Text(buildModerationEntryDescription('order_complaint'))
+        .width('100%')
+        .fontSize(13)
+        .lineHeight(20)
+        .fontColor(MUTED_COLOR)
+      this.buildActionButton(buildModerationEntryActionLabel('order_complaint'), '#FFFFFF', '#A86B00', '#E8D8B6', () => this.openComplaintPage())
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor(CARD_BACKGROUND)
+    .borderRadius(22)
+    .border({ width: 1, color: CARD_BORDER })
+  }
   build() {
     Scroll() {
       Column({ space: 14 }) {
@@ -871,7 +999,7 @@ struct OrderDetailPage {
           this.buildCounterpartyTrustCard()
           this.buildOrderInfoCard(this.order)
           if (!this.isReadOnlyTradeView()) {
-            this.buildModerationCard(this.order)
+            this.buildGovernanceEntryCard()
           }
           if (this.order.status === OrderStatus.COMPLETED) {
             this.buildReviewCard(this.order)
